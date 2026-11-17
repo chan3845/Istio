@@ -1,0 +1,10 @@
+# Module 04: Namespace-wide STRICT Mutual TLS Policy for orderflow
+# Rejects all plaintext connections on Envoy's 15006 virtualInbound listener.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: orderflow-strict-mtls
+  namespace: orderflow
+spec:
+  mtls:
+    mode: STRICT

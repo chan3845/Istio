@@ -1,0 +1,27 @@
+# Scenario 3: Overly Aggressive Circuit Breaker Causing 503 UO (Upstream Overflow)
+# Setting maxConnections: 1 and http1MaxPendingRequests: 1 causes concurrent
+# requests to order-service or payment-service to immediately fail with 503 UO.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-dr
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        # ❌ Too restrictive for concurrent production traffic!
+        maxConnections: 1
+      http:
+        http1MaxPendingRequests: 1
+        maxRequestsPerConnection: 1
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2

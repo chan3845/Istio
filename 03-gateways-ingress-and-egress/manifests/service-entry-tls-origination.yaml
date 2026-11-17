@@ -1,0 +1,54 @@
+# Module 03: ServiceEntry + VirtualService + DestinationRule for External TLS Origination
+# Allows workloads in orderflow to call http://httpbin.org:80 in plaintext while the local
+# Envoy sidecar originates TLS (HTTPS :443) to the external internet endpoint.
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-httpbin-se
+  namespace: orderflow
+spec:
+  hosts:
+    - httpbin.org
+  ports:
+    - number: 80
+      name: http-port
+      protocol: HTTP
+    - number: 443
+      name: https-port
+      protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: external-httpbin-tls-origination-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - httpbin.org
+  http:
+    - match:
+        - port: 80
+      route:
+        - destination:
+            host: httpbin.org
+            port:
+              number: 443
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: external-httpbin-tls-origination-dr
+  namespace: orderflow
+spec:
+  host: httpbin.org
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    portLevelSettings:
+      - port:
+          number: 443
+        tls:
+          mode: SIMPLE
+          sni: httpbin.org

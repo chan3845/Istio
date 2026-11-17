@@ -1,0 +1,96 @@
+# Reference Production Manifest: Automated Istio Canary with Argo Rollouts & Prometheus AnalysisTemplate
+# Note: Requires Argo Rollouts CRD (argoproj.io/v1alpha1) installed in the cluster to execute.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: istio-golden-signals-check
+  namespace: orderflow
+spec:
+  args:
+    - name: service-name
+    - name: namespace
+  metrics:
+    - name: istio-success-rate
+      interval: 30s
+      # Require >= 99.5% non-5xx success rate
+      successCondition: result[0] >= 0.995
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus.istio-system.svc.cluster.local:9090
+          query: |
+            sum(rate(istio_requests_total{
+              reporter="destination",
+              destination_service_namespace="{{args.namespace}}",
+              destination_service_name="{{args.service-name}}",
+              response_code!~"5.*"
+            }[1m]))
+            /
+            sum(rate(istio_requests_total{
+              reporter="destination",
+              destination_service_namespace="{{args.namespace}}",
+              destination_service_name="{{args.service-name}}"
+            }[1m]))
+    - name: istio-p99-latency-ms
+      interval: 30s
+      # Require P99 latency < 250ms
+      successCondition: result[0] < 250
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus.istio-system.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(istio_request_duration_milliseconds_bucket{
+                reporter="destination",
+                destination_service_namespace="{{args.namespace}}",
+                destination_service_name="{{args.service-name}}"
+              }[1m])) by (le)
+            )
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: payment-service
+  namespace: orderflow
+spec:
+  replicas: 4
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: payment-service
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-service-v1
+  strategy:
+    canary:
+      canaryService: payment-service
+      stableService: payment-service
+      trafficRouting:
+        istio:
+          virtualServices:
+            - name: payment-service-progressive
+              routes:
+                - canary-90-10
+          destinationRule:
+            name: payment-service-subsets
+            canarySubsetName: v2
+            stableSubsetName: v1
+      analysis:
+        templates:
+          - templateName: istio-golden-signals-check
+        startingStep: 1
+        args:
+          - name: service-name
+            value: payment-service
+          - name: namespace
+            value: orderflow
+      steps:
+        - setWeight: 10
+        - pause: { duration: 2m }
+        - setWeight: 25
+        - pause: { duration: 5m }
+        - setWeight: 50
+        - pause: { duration: 5m }
+        - setWeight: 100

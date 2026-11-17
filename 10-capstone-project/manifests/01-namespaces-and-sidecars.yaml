@@ -1,0 +1,50 @@
+# Pillar 1: Namespace Isolation & Envoy Egress Scoping (Sidecar CRDs)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novapay
+  labels:
+    istio-injection: enabled
+    tier: application
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novapay-pci
+  labels:
+    istio-injection: enabled
+    tier: pci-vault
+---
+# Scope all Envoy proxies in 'novapay' to only receive xDS config for:
+# 1. Services inside 'novapay'
+# 2. 'ledger-service' in 'novapay-pci'
+# 3. Control plane in 'istio-system'
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: default
+  namespace: novapay
+spec:
+  outboundTrafficPolicy:
+    mode: REGISTRY_ONLY
+  egress:
+    - hosts:
+        - "./*"
+        - "istio-system/*"
+        - "novapay-pci/ledger-service.novapay-pci.svc.cluster.local"
+---
+# Scope all Envoy proxies in 'novapay-pci' (PCI-DSS Vault) to ONLY see
+# services inside 'novapay-pci' and 'istio-system'. Zero outbound visibility
+# to general application namespaces or external hosts.
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: default
+  namespace: novapay-pci
+spec:
+  outboundTrafficPolicy:
+    mode: REGISTRY_ONLY
+  egress:
+    - hosts:
+        - "./*"
+        - "istio-system/*"

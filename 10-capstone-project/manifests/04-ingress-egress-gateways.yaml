@@ -1,0 +1,95 @@
+# Pillar 3: North-South Ingress Gateway & Controlled Egress with TLS Origination
+# ============================================================================
+# 1. North-South Ingress Gateway for api.novapay.internal
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: novapay-ingress-gateway
+  namespace: novapay
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "api.novapay.internal"
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: novapay-tls-cert
+      hosts:
+        - "api.novapay.internal"
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: novapay-ingress-vs
+  namespace: novapay
+spec:
+  hosts:
+    - "api.novapay.internal"
+  gateways:
+    - novapay-ingress-gateway
+  http:
+    - name: ingress-to-api-gateway
+      match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: api-gateway.novapay.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 5s
+---
+# ============================================================================
+# 2. Controlled Egress to External Credit Bureau API (httpbin.org)
+#    with Envoy TLS Origination (App sends HTTP :80 -> Envoy upgrades to HTTPS :443)
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-credit-bureau
+  namespace: novapay
+spec:
+  hosts:
+    - httpbin.org
+  exportTo:
+    - "."
+  ports:
+    - number: 80
+      name: http-port
+      protocol: HTTP
+      targetPort: 443
+    - number: 443
+      name: https-port
+      protocol: HTTPS
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: external-credit-bureau-tls-origination
+  namespace: novapay
+spec:
+  host: httpbin.org
+  exportTo:
+    - "."
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    portLevelSettings:
+      - port:
+          number: 80
+        tls:
+          # Envoy originates HTTPS (TLS) to httpbin.org:443 on behalf of fraud-service
+          mode: SIMPLE
+          sni: httpbin.org

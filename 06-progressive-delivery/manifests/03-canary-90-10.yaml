@@ -1,0 +1,52 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-subsets
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-progressive
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    # Keep QA header override active during canary rollout
+    - name: qa-dark-launch
+      match:
+        - headers:
+            x-qa-release:
+              exact: v2
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v2
+            port:
+              number: 8080
+          weight: 100
+    # Weighted Canary Stage 1: 90% v1, 10% v2
+    - name: canary-90-10
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1
+            port:
+              number: 8080
+          weight: 90
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v2
+            port:
+              number: 8080
+          weight: 10

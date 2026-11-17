@@ -1,0 +1,20 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-resilience
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    - timeout: 3.5s
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: 5xx,connect-failure,refused-stream,reset
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1
+            port:
+              number: 8080

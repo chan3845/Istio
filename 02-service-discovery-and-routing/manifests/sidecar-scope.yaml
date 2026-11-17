@@ -1,0 +1,13 @@
+# Module 02: Sidecar Resource to Scope Egress xDS Configuration
+# Restricts Envoy proxies in the orderflow namespace so istiod only pushes
+# Listeners, Routes, Clusters, and Endpoints for orderflow and istio-system.
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: orderflow-default-sidecar-scope
+  namespace: orderflow
+spec:
+  egress:
+    - hosts:
+        - "./*"
+        - "istio-system/*"

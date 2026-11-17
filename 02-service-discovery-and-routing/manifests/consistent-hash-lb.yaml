@@ -1,0 +1,27 @@
+# Module 02: Consistent Hash Load Balancing (Session Affinity by HTTP Header x-session-id)
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: order-service-dr
+  namespace: orderflow
+spec:
+  host: order-service.orderflow.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpHeaderName: x-session-id
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: order-service-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - order-service.orderflow.svc.cluster.local
+  http:
+    - name: consistent-hash-default
+      route:
+        - destination:
+            host: order-service.orderflow.svc.cluster.local
+          weight: 100

@@ -1,0 +1,41 @@
+# Multi-Node Kind Cluster Configuration for the Istio Production Course
+# Includes:
+# - 1 Control Plane node + 3 Worker nodes across two simulated availability zones
+# - Host port mappings (8080 -> 30080, 8443 -> 30443, 15021 -> 31021) for Istio Ingress Gateway
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: istio-course
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 8443
+        protocol: TCP
+      - containerPort: 31021
+        hostPort: 15021
+        protocol: TCP
+  - role: worker
+    labels:
+      topology.kubernetes.io/region: us-east-1
+      topology.kubernetes.io/zone: us-east-1a
+      workload-tier: general
+  - role: worker
+    labels:
+      topology.kubernetes.io/region: us-east-1
+      topology.kubernetes.io/zone: us-east-1b
+      workload-tier: general
+  - role: worker
+    labels:
+      topology.kubernetes.io/region: us-east-1
+      topology.kubernetes.io/zone: us-east-1c
+      workload-tier: pci
+

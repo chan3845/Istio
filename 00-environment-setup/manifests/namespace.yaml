@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orderflow
+  labels:
+    # Triggers Istio's MutatingAdmissionWebhook to inject the istio-proxy Envoy sidecar
+    istio-injection: enabled
+    app.kubernetes.io/part-of: orderflow-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: legacy-uninjected
+  labels:
+    # Intentionally NOT labeled with istio-injection=enabled
+    # Used in Module 04 to test PERMISSIVE vs STRICT mTLS with non-mesh workloads
+    app.kubernetes.io/part-of: orderflow-platform
+

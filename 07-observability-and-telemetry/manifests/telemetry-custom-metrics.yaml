@@ -1,0 +1,20 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: orderflow-custom-metrics
+  namespace: orderflow
+spec:
+  metrics:
+    - providers:
+        - name: prometheus
+      overrides:
+        - match:
+            metric: REQUEST_COUNT
+            mode: CLIENT_AND_SERVER
+          tagOverrides:
+            customer_tier:
+              operation: UPSERT
+              value: "request.headers['x-user-tier'] | 'standard'"
+            http_method:
+              operation: UPSERT
+              value: "request.method"

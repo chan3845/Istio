@@ -1,0 +1,36 @@
+# Configures mesh-wide or namespace-wide structured JSON access logs
+# Also demonstrates the MeshConfig extensionProvider setup for JSON Envoy logging
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: namespace-access-logs
+  namespace: orderflow
+spec:
+  accessLogging:
+    - providers:
+        - name: envoy
+---
+# Optional: EnvoyFilter / MeshConfig equivalent that defines a custom JSON access log provider
+# In production Istio, add the `envoy-json` extensionProvider in `istio-system/istio` ConfigMap:
+# data:
+#   mesh: |
+#     extensionProviders:
+#       - name: envoy-json
+#         envoyFileAccessLog:
+#           path: /dev/stdout
+#           logFormat:
+#             labels:
+#               timestamp: "%START_TIME%"
+#               method: "%REQ(:METHOD)%"
+#               path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+#               protocol: "%PROTOCOL%"
+#               response_code: "%RESPONSE_CODE%"
+#               response_flags: "%RESPONSE_FLAGS%"
+#               duration_ms: "%DURATION%"
+#               upstream_service_time: "%RESP(X-ENVOY-UPSTREAM-service-TIME)%"
+#               upstream_cluster: "%UPSTREAM_CLUSTER%"
+#               upstream_host: "%UPSTREAM_HOST%"
+#               authority: "%REQ(:AUTHORITY)%"
+#               request_id: "%REQ(X-REQUEST-ID)%"
+#               traceparent: "%REQ(TRACEPARENT)%"
+#               b3_trace_id: "%REQ(X-B3-TRACEID)%"

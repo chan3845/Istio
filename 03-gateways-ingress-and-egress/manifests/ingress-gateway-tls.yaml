@@ -1,0 +1,60 @@
+# Module 03: Classic Istio Gateway (SIMPLE TLS + HTTPS Redirect) and VirtualService
+# Note: Requires Secret 'orderflow-tls-credential' in namespace 'istio-system'.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: orderflow-gateway
+  namespace: orderflow
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "orderflow.example.com"
+      tls:
+        httpsRedirect: true
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - "orderflow.example.com"
+      tls:
+        mode: SIMPLE
+        credentialName: orderflow-tls-credential
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: orderflow-ingress-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - "orderflow.example.com"
+  gateways:
+    - orderflow/orderflow-gateway
+  http:
+    - name: direct-orders-api
+      match:
+        - uri:
+            prefix: /orders
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: order-service.orderflow.svc.cluster.local
+            port:
+              number: 8080
+    - name: frontend-web-root
+      match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: frontend.orderflow.svc.cluster.local
+            port:
+              number: 80

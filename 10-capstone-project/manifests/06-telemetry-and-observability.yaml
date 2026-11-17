@@ -1,0 +1,35 @@
+# Pillar 6: Production Telemetry (Access Logs, 100% Trace Sampling, & Custom Metric Tag)
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: novapay-telemetry
+  namespace: novapay
+spec:
+  accessLogging:
+    - providers:
+        - name: envoy
+  tracing:
+    - randomSamplingPercentage: 100.0
+  metrics:
+    - providers:
+        - name: prometheus
+      overrides:
+        - match:
+            metric: REQUEST_COUNT
+            mode: CLIENT_AND_SERVER
+          tagOverrides:
+            priority_tier:
+              operation: UPSERT
+              value: "has(request.headers['x-priority-tier']) ? request.headers['x-priority-tier'] : 'standard'"
+---
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: novapay-pci-telemetry
+  namespace: novapay-pci
+spec:
+  accessLogging:
+    - providers:
+        - name: envoy
+  tracing:
+    - randomSamplingPercentage: 100.0

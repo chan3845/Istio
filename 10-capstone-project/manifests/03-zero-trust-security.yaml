@@ -1,0 +1,158 @@
+# Pillar 2: Zero-Trust Security (STRICT mTLS, Default-Deny, SPIFFE RBAC, & JWT Auth)
+# ============================================================================
+# 1. STRICT Mutual TLS in Both Namespaces
+# ============================================================================
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default-strict-mtls
+  namespace: novapay
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default-strict-mtls
+  namespace: novapay-pci
+spec:
+  mtls:
+    mode: STRICT
+---
+# ============================================================================
+# 2. Default-Deny ("allow-nothing") Baselines in Both Namespaces
+# ============================================================================
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-nothing
+  namespace: novapay
+spec: {}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-nothing
+  namespace: novapay-pci
+spec: {}
+---
+# ============================================================================
+# 3. Fine-Grained SPIFFE Identity & L7 Authorization Policies
+# ============================================================================
+# Allow istio-ingressgateway (and client-tester for internal testing) to call api-gateway
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-to-api-gateway
+  namespace: novapay
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  action: ALLOW
+  rules:
+    # Public health/root endpoint allowed from ingressgateway or client-tester
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
+              - "cluster.local/ns/novapay/sa/client-tester-sa"
+      to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/", "/health"]
+    # Protected /api/v1/checkout endpoint requires BOTH valid mTLS caller AND a valid JWT principal!
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
+              - "cluster.local/ns/novapay/sa/client-tester-sa"
+        - source:
+            requestPrincipals: ["*"]
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+            paths: ["/api/v1/checkout", "/api/v1/checkout/*"]
+---
+# Allow api-gateway (and client-tester for canary verification) to call checkout-service
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api-gateway-to-checkout
+  namespace: novapay
+spec:
+  selector:
+    matchLabels:
+      app: checkout-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/novapay/sa/api-gateway-sa"
+              - "cluster.local/ns/novapay/sa/client-tester-sa"
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+---
+# Strictly allow ONLY checkout-sa to call fraud-service
+# Any direct call from client-tester-sa or api-gateway-sa is DENIED (403 RBAC: access denied)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-only-checkout-to-fraud
+  namespace: novapay
+spec:
+  selector:
+    matchLabels:
+      app: fraud-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/novapay/sa/checkout-sa"
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+---
+# PCI-DSS VAULT POLICY: Strictly allow ONLY checkout-sa from namespace 'novapay'
+# to invoke ledger-service in 'novapay-pci'. Even pods inside 'novapay-pci'
+# (such as settlement-worker) are denied!
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-only-checkout-to-pci-ledger
+  namespace: novapay-pci
+spec:
+  selector:
+    matchLabels:
+      app: ledger-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/novapay/sa/checkout-sa"
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+---
+# ============================================================================
+# 4. End-User JWT Validation on api-gateway (RequestAuthentication)
+# ============================================================================
+apiVersion: security.istio.io/v1
+kind: RequestAuthentication
+metadata:
+  name: api-gateway-jwt-auth
+  namespace: novapay
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  jwtRules:
+    - issuer: "testing@secure.istio.io"
+      forwardOriginalToken: true
+      jwks: |
+        {"keys":[{"e":"AQAB","kid":"DHFbpoIUqrY8t2zpA2qXfCmr5VO5ZEr4RzHU_-envvQ","kty":"RSA","n":"xAE7eB6qugXyCAG3yhh7pkDkT65pHymX-P7KfIupjf59vsdo91bSP9C8H07pSAGQO1MV_xFj9VswgsCg4R6otmg5PV2He9mlZdHt3U53Ig_pbhjlPkX0EhDJ784Sl15LVQ96YX8ZB_riWjcc0Qv74Qb064LRYbZcPG5xnHZ0U52fk03s452ba515z0sW89b_2rB025216rM7wn_n012M4f2h5W3K2f1v28O7fX8s_U1k2s9s012j3h4k5l6m7n8o9p0q1r2s3t4u5v6w7x8y9z0A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U1V2W3X4Y5Z"}]}

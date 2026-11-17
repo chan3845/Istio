@@ -1,0 +1,23 @@
+# Module 04: Intentional Broken AuthorizationPolicy (The AND vs OR YAML List Trap)
+# Intended: Allow toolbox-sa ONLY when HTTP method is HEAD.
+# Actual Bug: Because '- to:' has a leading dash, 'from' and 'to' are TWO SEPARATE RULES (Logical OR)!
+# Rule 1 allows toolbox-sa for ANY method (including DELETE!).
+# Rule 2 allows ANY caller in the mesh if the method is HEAD!
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: broken-inventory-and-or-trap
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: inventory-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/orderflow/sa/toolbox-sa"
+    - to:
+        - operation:
+            methods: ["HEAD"]

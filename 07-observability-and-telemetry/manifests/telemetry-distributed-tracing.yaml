@@ -1,0 +1,20 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: orderflow-tracing
+  namespace: orderflow
+spec:
+  tracing:
+    - providers:
+        - name: jaeger
+      # Lab setting: 100% trace sampling so every test request is captured.
+      # Production recommendation: 0.1 to 1.0 (0.1% - 1%).
+      randomSamplingPercentage: 100.0
+      customTags:
+        orderflow.environment:
+          literal:
+            value: "production-lab"
+        customer.tier:
+          header:
+            name: x-user-tier
+            defaultValue: "standard"

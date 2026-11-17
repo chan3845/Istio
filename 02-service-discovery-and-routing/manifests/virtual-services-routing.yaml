@@ -1,0 +1,61 @@
+# Module 02: VirtualServices for Canary Weighted Routing, URI Prefix Rewrite, and Header-Based Routing
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: order-service-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - order-service.orderflow.svc.cluster.local
+  http:
+    - name: rewrite-api-orders
+      match:
+        - uri:
+            prefix: /api/orders
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: order-service.orderflow.svc.cluster.local
+            subset: v1
+          weight: 80
+        - destination:
+            host: order-service.orderflow.svc.cluster.local
+            subset: v2
+          weight: 20
+    - name: default-canary-split
+      route:
+        - destination:
+            host: order-service.orderflow.svc.cluster.local
+            subset: v1
+          weight: 80
+        - destination:
+            host: order-service.orderflow.svc.cluster.local
+            subset: v2
+          weight: 20
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    - name: vip-fast-track
+      match:
+        - headers:
+            x-user-tier:
+              exact: vip
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v2
+          weight: 100
+    - name: standard-tier-default
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1
+          weight: 100

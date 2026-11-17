@@ -1,0 +1,118 @@
+# Module 01: Istio Ambient Mode + Waypoint Proxy Demo
+# Demonstrates enrolling a namespace in Ambient Mode (istio.io/dataplane-mode: ambient)
+# and deploying a Kubernetes Gateway API Waypoint Proxy (gatewayClassName: istio-waypoint).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orderflow-ambient
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: orderflow-waypoint
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: orderflow-waypoint
+  namespace: orderflow-ambient
+  labels:
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ambient-order-sa
+  namespace: orderflow-ambient
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ambient-order-service
+  namespace: orderflow-ambient
+  labels:
+    app: ambient-order-service
+spec:
+  ports:
+    - name: http-web
+      port: 8080
+      targetPort: 8080
+      appProtocol: http
+  selector:
+    app: ambient-order-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ambient-order-service
+  namespace: orderflow-ambient
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ambient-order-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: ambient-order-service
+        version: v1
+    spec:
+      serviceAccountName: ambient-order-sa
+      containers:
+        - name: order-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "ambient-order-service-v1"
+            - name: MESSAGE
+              value: "Served over Istio Ambient Mode (ztunnel HBONE + Waypoint)"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ambient-client-sa
+  namespace: orderflow-ambient
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ambient-client
+  namespace: orderflow-ambient
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ambient-client
+  template:
+    metadata:
+      labels:
+        app: ambient-client
+    spec:
+      serviceAccountName: ambient-client-sa
+      containers:
+        - name: curl
+          image: curlimages/curl:8.5.0
+          command: ["/bin/sh", "-c", "sleep 3650d"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

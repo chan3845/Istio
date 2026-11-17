@@ -1,0 +1,17 @@
+# Module 02: Intentional Broken Configuration (Missing Subset Trap -> HTTP 503 NR)
+# Routes traffic to subset "v2-canary" on inventory-service, which is NOT defined in inventory-service-dr.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: inventory-broken-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - inventory-service.orderflow.svc.cluster.local
+  http:
+    - name: broken-canary-route
+      route:
+        - destination:
+            host: inventory-service.orderflow.svc.cluster.local
+            subset: v2-canary
+          weight: 100

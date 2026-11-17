@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-locality-failover
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+      localityLbSetting:
+        enabled: true
+        failover:
+          - from: us-east-1
+            to: us-west-2
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+      minHealthPercent: 50

@@ -1,0 +1,38 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-outlier-detection
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutive5xxErrors: 2
+      interval: 5s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+      minHealthPercent: 0
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-all-pods
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            port:
+              number: 8080

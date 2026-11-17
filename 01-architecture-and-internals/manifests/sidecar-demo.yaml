@@ -1,0 +1,27 @@
+# Module 01: Sidecar Mode Diagnostic & Verification Manifest
+# Ensures the orderflow namespace has sidecar injection enabled and deploys a diagnostic ConfigMap
+# documenting key Envoy admin endpoints reachable inside any pod on 127.0.0.1:15000.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orderflow
+  labels:
+    istio-injection: enabled
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-debug-cheatsheet
+  namespace: orderflow
+  labels:
+    module: "01-architecture-and-internals"
+data:
+  admin_endpoints.txt: |
+    # Common Envoy Admin Endpoints (127.0.0.1:15000 inside pod via pilot-agent request GET <path>)
+    /config_dump?include_eds    - Full xDS configuration dump (Bootstrap, Listeners, Routes, Clusters, Endpoints, Secrets)
+    /clusters                   - Live upstream cluster membership, health flags, circuit breaker state, and request counters
+    /listeners                  - Active physical and virtual listeners
+    /stats/prometheus           - Prometheus metrics exposed by Envoy (also reachable on :15090/stats/prometheus)
+    /server_info                - Envoy binary version, uptime, and command-line flags
+    /ready                      - Readiness check state
+    /logging?level=debug        - Dynamically change Envoy log level at runtime (POST request)

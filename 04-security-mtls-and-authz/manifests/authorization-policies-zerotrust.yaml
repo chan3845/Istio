@@ -1,0 +1,94 @@
+# Module 04: Zero-Trust AuthorizationPolicies for OrderFlow
+# 1. Default-Deny baseline (allow-nothing) across the entire orderflow namespace
+# 2. Explicit least-privilege ALLOW policies per workload using cryptographic SPIFFE principals
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-nothing-baseline
+  namespace: orderflow
+spec:
+  {}
+---
+# Allow Ingress Gateway and client-toolbox to call frontend
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-frontend-inbound
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: frontend
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
+              - "cluster.local/ns/orderflow/sa/orderflow-k8s-gateway-istio"
+              - "cluster.local/ns/orderflow/sa/toolbox-sa"
+      to:
+        - operation:
+            methods: ["GET", "HEAD"]
+---
+# Allow ONLY frontend-sa (and Ingress Gateway for /orders route) to call order-service
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-order-service-inbound
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: order-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/orderflow/sa/frontend-sa"
+              - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
+              - "cluster.local/ns/orderflow/sa/orderflow-k8s-gateway-istio"
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+---
+# Allow ONLY order-sa to call payment-service
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-payment-service-inbound
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/orderflow/sa/order-sa"
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+---
+# Allow ONLY order-sa to call inventory-service
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-inventory-service-inbound
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: inventory-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/orderflow/sa/order-sa"
+      to:
+        - operation:
+            methods: ["GET"]

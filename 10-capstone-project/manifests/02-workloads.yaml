@@ -1,0 +1,428 @@
+# Pillar 1 & 2: NovaPay Microservices Workloads with Dedicated ServiceAccounts & Explicit Port Naming
+# ============================================================================
+# NAMESPACE: novapay (General Application Tier)
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway-sa
+  namespace: novapay
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: checkout-sa
+  namespace: novapay
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fraud-sa
+  namespace: novapay
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: client-tester-sa
+  namespace: novapay
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: novapay
+  labels:
+    app: api-gateway
+    service: api-gateway
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - name: http-gateway
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-v1
+  namespace: novapay
+  labels:
+    app: api-gateway
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        version: v1
+    spec:
+      serviceAccountName: api-gateway-sa
+      containers:
+        - name: api-gateway
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "api-gateway-v1"
+            - name: MESSAGE
+              value: "NovaPay API Gateway"
+            - name: UPSTREAM_URIS
+              value: "http://checkout-service.novapay.svc.cluster.local:8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-service
+  namespace: novapay
+  labels:
+    app: checkout-service
+    service: checkout-service
+spec:
+  selector:
+    app: checkout-service
+  ports:
+    - name: http-checkout
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-service-v1
+  namespace: novapay
+  labels:
+    app: checkout-service
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: checkout-service
+        version: v1
+    spec:
+      serviceAccountName: checkout-sa
+      containers:
+        - name: checkout-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "checkout-service-v1"
+            - name: MESSAGE
+              value: "Checkout Orchestrator v1 (Stable)"
+            - name: UPSTREAM_URIS
+              value: "http://fraud-service.novapay.svc.cluster.local:8080,http://ledger-service.novapay-pci.svc.cluster.local:8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-service-v2
+  namespace: novapay
+  labels:
+    app: checkout-service
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout-service
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: checkout-service
+        version: v2
+    spec:
+      serviceAccountName: checkout-sa
+      containers:
+        - name: checkout-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "checkout-service-v2"
+            - name: MESSAGE
+              value: "Checkout Orchestrator v2 (Canary / Platinum VIP)"
+            - name: UPSTREAM_URIS
+              value: "http://fraud-service.novapay.svc.cluster.local:8080,http://ledger-service.novapay-pci.svc.cluster.local:8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-service
+  namespace: novapay
+  labels:
+    app: fraud-service
+    service: fraud-service
+spec:
+  selector:
+    app: fraud-service
+  ports:
+    - name: http-fraud
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-service-v1
+  namespace: novapay
+  labels:
+    app: fraud-service
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: fraud-service
+        version: v1
+    spec:
+      serviceAccountName: fraud-sa
+      containers:
+        - name: fraud-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "fraud-service-v1"
+            - name: MESSAGE
+              value: "Fraud Scoring Engine v1 (APPROVED)"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client-tester
+  namespace: novapay
+  labels:
+    app: client-tester
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client-tester
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: client-tester
+        version: v1
+    spec:
+      serviceAccountName: client-tester-sa
+      containers:
+        - name: curl
+          image: curlimages/curl:8.5.0
+          command: ["/bin/sh", "-c", "sleep 3650d"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+# ============================================================================
+# NAMESPACE: novapay-pci (High-Security PCI-DSS Payment Vault Tier)
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ledger-sa
+  namespace: novapay-pci
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: settlement-sa
+  namespace: novapay-pci
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-service
+  namespace: novapay-pci
+  labels:
+    app: ledger-service
+    service: ledger-service
+spec:
+  selector:
+    app: ledger-service
+  ports:
+    - name: http-ledger
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service-v1
+  namespace: novapay-pci
+  labels:
+    app: ledger-service
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ledger-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: ledger-service
+        version: v1
+    spec:
+      serviceAccountName: ledger-sa
+      containers:
+        - name: ledger-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "ledger-service-v1"
+            - name: MESSAGE
+              value: "PCI Ledger Vault v1 (Committed)"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service-v2
+  namespace: novapay-pci
+  labels:
+    app: ledger-service
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ledger-service
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: ledger-service
+        version: v2
+    spec:
+      serviceAccountName: ledger-sa
+      containers:
+        - name: ledger-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "ledger-service-v2"
+            - name: MESSAGE
+              value: "PCI Ledger Vault v2 (Shadow Mirror Target)"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: settlement-worker
+  namespace: novapay-pci
+  labels:
+    app: settlement-worker
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: settlement-worker
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: settlement-worker
+        version: v1
+    spec:
+      serviceAccountName: settlement-sa
+      containers:
+        - name: curl
+          image: curlimages/curl:8.5.0
+          command: ["/bin/sh", "-c", "sleep 3650d"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

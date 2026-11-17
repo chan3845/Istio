@@ -1,0 +1,459 @@
+# OrderFlow Reference Microservices Platform
+# Topology:
+#   frontend (v1) -> order-service (v1, v2) -> payment-service (v1, v2) & inventory-service (v1)
+#   client-toolbox (curl inside mesh)
+#   legacy-client (curl outside mesh in legacy-uninjected namespace)
+#
+# All services use explicit Istio port naming (http-*) and dedicated Kubernetes ServiceAccounts
+# to provide distinct SPIFFE identities (spiffe://cluster.local/ns/orderflow/sa/<sa-name>).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend-sa
+  namespace: orderflow
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: orderflow
+  labels:
+    app: frontend
+    service: frontend
+spec:
+  ports:
+    - name: http-web
+      port: 80
+      targetPort: 8080
+  selector:
+    app: frontend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-v1
+  namespace: orderflow
+  labels:
+    app: frontend
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: frontend
+        version: v1
+    spec:
+      serviceAccountName: frontend-sa
+      containers:
+        - name: frontend
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+              name: http-web
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "frontend-v1"
+            - name: MESSAGE
+              value: "OrderFlow Web Storefront v1"
+            - name: SERVER_TYPE
+              value: "http"
+            - name: UPSTREAM_URIS
+              value: "http://order-service.orderflow.svc.cluster.local:8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# ==============================================================================
+# ORDER SERVICE (v1 and v2)
+# Calls both payment-service and inventory-service
+# ==============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-sa
+  namespace: orderflow
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: orderflow
+  labels:
+    app: order-service
+    service: order-service
+spec:
+  ports:
+    - name: http-api
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: order-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service-v1
+  namespace: orderflow
+  labels:
+    app: order-service
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: order-service
+        version: v1
+    spec:
+      serviceAccountName: order-sa
+      containers:
+        - name: order-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+              name: http-api
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "order-service-v1"
+            - name: MESSAGE
+              value: "Order Processing Engine v1 (Standard)"
+            - name: SERVER_TYPE
+              value: "http"
+            - name: UPSTREAM_URIS
+              value: "http://payment-service.orderflow.svc.cluster.local:8080,http://inventory-service.orderflow.svc.cluster.local:8080"
+            - name: HTTP_CLIENT_APPEND_REQUEST
+              value: "true"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service-v2
+  namespace: orderflow
+  labels:
+    app: order-service
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: order-service
+        version: v2
+    spec:
+      serviceAccountName: order-sa
+      containers:
+        - name: order-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+              name: http-api
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "order-service-v2"
+            - name: MESSAGE
+              value: "Order Processing Engine v2 (Express Checkout)"
+            - name: SERVER_TYPE
+              value: "http"
+            - name: UPSTREAM_URIS
+              value: "http://payment-service.orderflow.svc.cluster.local:8080,http://inventory-service.orderflow.svc.cluster.local:8080"
+            - name: HTTP_CLIENT_APPEND_REQUEST
+              value: "true"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# ==============================================================================
+# PAYMENT SERVICE (v1 and v2)
+# ==============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-sa
+  namespace: orderflow
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: orderflow
+  labels:
+    app: payment-service
+    service: payment-service
+spec:
+  ports:
+    - name: http-api
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: payment-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service-v1
+  namespace: orderflow
+  labels:
+    app: payment-service
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        version: v1
+    spec:
+      serviceAccountName: payment-sa
+      containers:
+        - name: payment-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+              name: http-api
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "payment-service-v1"
+            - name: MESSAGE
+              value: "Payment Gateway Adapter v1 (Stable)"
+            - name: SERVER_TYPE
+              value: "http"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service-v2
+  namespace: orderflow
+  labels:
+    app: payment-service
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-service
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        version: v2
+    spec:
+      serviceAccountName: payment-sa
+      containers:
+        - name: payment-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+              name: http-api
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "payment-service-v2"
+            - name: MESSAGE
+              value: "Payment Gateway Adapter v2 (Multi-Currency Canary)"
+            - name: SERVER_TYPE
+              value: "http"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# ==============================================================================
+# INVENTORY SERVICE (v1)
+# ==============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: inventory-sa
+  namespace: orderflow
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: orderflow
+  labels:
+    app: inventory-service
+    service: inventory-service
+spec:
+  ports:
+    - name: http-api
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: inventory-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service-v1
+  namespace: orderflow
+  labels:
+    app: inventory-service
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+        version: v1
+    spec:
+      serviceAccountName: inventory-sa
+      containers:
+        - name: inventory-service
+          image: nicholasjackson/fake-service:v0.26.2
+          ports:
+            - containerPort: 8080
+              name: http-api
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: NAME
+              value: "inventory-service-v1"
+            - name: MESSAGE
+              value: "Warehouse Inventory Ledger v1"
+            - name: SERVER_TYPE
+              value: "http"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# ==============================================================================
+# CLIENT TOOLBOX (In-Mesh Diagnostic & Testing Pod)
+# ==============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: toolbox-sa
+  namespace: orderflow
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client-toolbox
+  namespace: orderflow
+  labels:
+    app: client-toolbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client-toolbox
+  template:
+    metadata:
+      labels:
+        app: client-toolbox
+    spec:
+      serviceAccountName: toolbox-sa
+      containers:
+        - name: toolbox
+          image: curlimages/curl:8.10.1
+          command: ["/bin/sh", "-c", "sleep 3650d"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+# ==============================================================================
+# LEGACY CLIENT (Out-of-Mesh Pod in legacy-uninjected Namespace)
+# ==============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: legacy-sa
+  namespace: legacy-uninjected
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-client
+  namespace: legacy-uninjected
+  labels:
+    app: legacy-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: legacy-client
+  template:
+    metadata:
+      labels:
+        app: legacy-client
+    spec:
+      serviceAccountName: legacy-sa
+      containers:
+        - name: legacy-client
+          image: curlimages/curl:8.10.1
+          command: ["/bin/sh", "-c", "sleep 3650d"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+

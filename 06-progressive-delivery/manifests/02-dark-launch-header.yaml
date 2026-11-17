@@ -1,0 +1,46 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-subsets
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-progressive
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    # Rule 1: Internal QA Dark Launch (Header Match) -> 100% v2
+    - name: qa-dark-launch
+      match:
+        - headers:
+            x-qa-release:
+              exact: v2
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v2
+            port:
+              number: 8080
+          weight: 100
+    # Rule 2: Public Production Traffic (Default Fallback) -> 100% v1
+    - name: public-production-v1
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1
+            port:
+              number: 8080
+          weight: 100

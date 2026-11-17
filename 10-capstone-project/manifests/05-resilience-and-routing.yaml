@@ -1,0 +1,208 @@
+# Pillar 4 & 5: Resilience (Timeouts, Retries, Circuit Breaking, Outlier Detection)
+#               & Progressive Delivery (Canary 80/20, VIP Header Routing, Traffic Mirroring)
+# ============================================================================
+# 1. api-gateway DestinationRule
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: api-gateway-dr
+  namespace: novapay
+spec:
+  host: api-gateway.novapay.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+---
+# ============================================================================
+# 2. checkout-service: Subsets + Circuit Breaking + VIP Header Routing + 80/20 Canary
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: checkout-service-dr
+  namespace: novapay
+spec:
+  host: checkout-service.novapay.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        maxRequestsPerConnection: 50
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: checkout-service-vs
+  namespace: novapay
+spec:
+  hosts:
+    - checkout-service.novapay.svc.cluster.local
+  http:
+    # Rule 1: 100% VIP Priority Routing (x-priority-tier: platinum -> checkout-service v2)
+    - name: vip-platinum-route
+      match:
+        - headers:
+            x-priority-tier:
+              exact: platinum
+      timeout: 3s
+      retries:
+        attempts: 2
+        perTryTimeout: 1s
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,reset,5xx
+      route:
+        - destination:
+            host: checkout-service.novapay.svc.cluster.local
+            subset: v2
+          weight: 100
+    # Rule 2: Default 80/20 Canary Split (80% v1, 20% v2)
+    - name: default-canary-split
+      timeout: 3s
+      retries:
+        attempts: 2
+        perTryTimeout: 1s
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,reset,5xx
+      route:
+        - destination:
+            host: checkout-service.novapay.svc.cluster.local
+            subset: v1
+          weight: 80
+        - destination:
+            host: checkout-service.novapay.svc.cluster.local
+            subset: v2
+          weight: 20
+---
+# ============================================================================
+# 3. fraud-service: Circuit Breaking, Outlier Detection, Timeouts & Retries
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: fraud-service-dr
+  namespace: novapay
+spec:
+  host: fraud-service.novapay.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        maxRequestsPerConnection: 50
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: fraud-service-vs
+  namespace: novapay
+spec:
+  hosts:
+    - fraud-service.novapay.svc.cluster.local
+  http:
+    - name: fraud-resilient-route
+      timeout: 3s
+      retries:
+        attempts: 2
+        perTryTimeout: 1s
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,reset,5xx
+      route:
+        - destination:
+            host: fraud-service.novapay.svc.cluster.local
+            subset: v1
+          weight: 100
+---
+# ============================================================================
+# 4. ledger-service (novapay-pci): Circuit Breaking, Outlier Detection,
+#    & 100% Asynchronous Shadow Traffic Mirroring (v1 -> v2)
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: ledger-service-dr
+  namespace: novapay-pci
+spec:
+  host: ledger-service.novapay-pci.svc.cluster.local
+  exportTo:
+    - "."
+    - "novapay"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        maxRequestsPerConnection: 50
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: ledger-service-vs
+  namespace: novapay-pci
+spec:
+  hosts:
+    - ledger-service.novapay-pci.svc.cluster.local
+  exportTo:
+    - "."
+    - "novapay"
+  http:
+    - name: ledger-live-with-shadow-mirror
+      timeout: 3s
+      retries:
+        attempts: 2
+        perTryTimeout: 1s
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,reset,5xx
+      route:
+        - destination:
+            host: ledger-service.novapay-pci.svc.cluster.local
+            subset: v1
+          weight: 100
+      mirror:
+        host: ledger-service.novapay-pci.svc.cluster.local
+        subset: v2
+      mirrorPercentage:
+        value: 100.0

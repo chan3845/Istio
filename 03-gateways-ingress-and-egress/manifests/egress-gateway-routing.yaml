@@ -1,0 +1,111 @@
+# Module 03: Routing External Traffic Through a Dedicated Istio Egress Gateway
+# 1. Workload sidecar intercepts plaintext HTTP :80 to httpbin.org
+# 2. Workload sidecar routes over internal ISTIO_MUTUAL mTLS (:443) to istio-egressgateway
+# 3. istio-egressgateway terminates internal mTLS and originates external SIMPLE TLS (:443) to httpbin.org
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-httpbin-se
+  namespace: orderflow
+spec:
+  hosts:
+    - httpbin.org
+  ports:
+    - number: 80
+      name: http-port
+      protocol: HTTP
+    - number: 443
+      name: https-port
+      protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: istio-egressgateway-httpbin
+  namespace: orderflow
+spec:
+  selector:
+    istio: egressgateway
+  servers:
+    - port:
+        number: 443
+        name: tls-egress
+        protocol: HTTPS
+      hosts:
+        - httpbin.org
+      tls:
+        mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: egressgateway-for-httpbin-dr
+  namespace: orderflow
+spec:
+  host: istio-egressgateway.istio-system.svc.cluster.local
+  subsets:
+    - name: httpbin
+      trafficPolicy:
+        loadBalancer:
+          simple: ROUND_ROBIN
+        portLevelSettings:
+          - port:
+              number: 443
+            tls:
+              mode: ISTIO_MUTUAL
+              sni: httpbin.org
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: direct-httpbin-through-egress-gateway
+  namespace: orderflow
+spec:
+  hosts:
+    - httpbin.org
+  gateways:
+    - mesh
+    - orderflow/istio-egressgateway-httpbin
+  http:
+    - name: from-mesh-sidecars-to-egress-gateway
+      match:
+        - gateways:
+            - mesh
+          port: 80
+      route:
+        - destination:
+            host: istio-egressgateway.istio-system.svc.cluster.local
+            subset: httpbin
+            port:
+              number: 443
+          weight: 100
+    - name: from-egress-gateway-to-external-internet
+      match:
+        - gateways:
+            - orderflow/istio-egressgateway-httpbin
+          port: 443
+      route:
+        - destination:
+            host: httpbin.org
+            port:
+              number: 443
+          weight: 100
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: external-httpbin-tls-origination-dr
+  namespace: orderflow
+spec:
+  host: httpbin.org
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    portLevelSettings:
+      - port:
+          number: 443
+        tls:
+          mode: SIMPLE
+          sni: httpbin.org

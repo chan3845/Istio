@@ -1,0 +1,48 @@
+# Module 04: End-User JWT Authentication (RequestAuthentication) + Claim-Based AuthorizationPolicy
+# Uses inline JWKS so JWT verification works 100% offline/air-gapped without external internet calls.
+apiVersion: security.istio.io/v1
+kind: RequestAuthentication
+metadata:
+  name: order-service-jwt-authn
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: order-service
+  jwtRules:
+    - issuer: "testing@secure.istio.io"
+      forwardOriginalToken: true
+      jwks: |
+        {"keys":[{"e":"AQAB","kid":"DHFbpoIUqrY8t2zpA2qXfCmr5VO5ZEr4RzHU_-QivvQ","kty":"RSA","n":"xAE7eB6qugXyCAG3yhh7pkDkT65pHymX-P7KfIupjf59vsdo91bSP9C8H07pSAGQO1MV_xFj9VswgsCg4R6otmg5PV2He9mbdZdHtD9M3b_QB0WP373Nl4615CoXv31E6Bnb6RY0LhEe60ZqB376lLh9_bQ353B1s2T02H3_r2f2tw"}]}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-order-admin-jwt
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: order-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            requestPrincipals: ["testing@secure.istio.io/testing@secure.istio.io"]
+      to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/admin", "/admin/*"]
+      when:
+        - key: request.auth.claims[groups]
+          values: ["group1"]
+---
+# Helper ConfigMap storing Istio's official sample JWT token matching the inline JWKS above
+# Claims: {"iss":"testing@secure.istio.io","sub":"testing@secure.istio.io","groups":["group1","group2"],"exp":4685989700}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-jwt-tokens
+  namespace: orderflow
+data:
+  token-group1: "eyJhbGciOiJSUzI1NiIsImtpZCI6IkRIRmJwb0lVcXJZOHQyenBBMnFYZkNtcjVWTzVaRXI0UnpIVV8tUWl2dlEiLCJ0eXAiOiJKV1QifQ.eyJleHAiOjM1MzI0Nzk3MDAsImZvbyI6ImJhciIsImdyb3VwcyI6WyJncm91cDEiLCJncm91cDIiXSwiaWF0IjoxNTMyMzkzMzAwLCJpc3MiOiJ0ZXN0aW5nQHNlY3VyZS5pc3Rpby5pbyIsInN1YiI6InRlc3RpbmdAc2VjdXJlLmlzdGlvLmlvIn0.n323338-de25I9J151K8qXR7vT4-fd2gH21W3kbeH625P0j-LR2A138zU42H98kF4v21q0V-N0I-E242p_kY3A"

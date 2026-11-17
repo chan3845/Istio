@@ -1,0 +1,40 @@
+# Complete Promotion to v2 (0% v1, 100% v2)
+# For emergency rollback to v1, simply invert the weights to v1: 100, v2: 0 (see bottom comment or LAB.md Phase 4)
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-subsets
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-progressive
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    - name: full-v2-promotion
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1
+            port:
+              number: 8080
+          weight: 0
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v2
+            port:
+              number: 8080
+          weight: 100

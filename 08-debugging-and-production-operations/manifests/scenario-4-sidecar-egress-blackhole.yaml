@@ -1,0 +1,20 @@
+# Scenario 4: Sidecar Egress Blackhole
+# This Sidecar CRD scopes order-service's Envoy proxy to only see payment-service,
+# accidentally omitting inventory-service. Combined with REGISTRY_ONLY, outbound
+# calls from order-service to inventory-service fail with 502/503 NR!
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: order-service-sidecar
+  namespace: orderflow
+spec:
+  workloadSelector:
+    labels:
+      app: order-service
+  outboundTrafficPolicy:
+    mode: REGISTRY_ONLY
+  egress:
+    - hosts:
+        - "istio-system/*"
+        - "orderflow/payment-service.orderflow.svc.cluster.local"
+        # ❌ Missing: "orderflow/inventory-service.orderflow.svc.cluster.local"

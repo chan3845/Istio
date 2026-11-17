@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-orderflow-golden-signals-rules
+  namespace: istio-system
+  labels:
+    app: prometheus
+data:
+  orderflow-golden-signals.rules.yaml: |
+    groups:
+      - name: orderflow.istio.golden_signals.recording
+        interval: 15s
+        rules:
+          # 1. Traffic: Per-workload Requests Per Second (RPS)
+          - record: workload:istio_requests_per_second:rate1m
+            expr: |
+              sum(rate(istio_requests_total{
+                reporter="destination",
+                destination_service_namespace="orderflow"
+              }[1m])) by (destination_service_name, destination_workload, response_code)
+
+          # 2. Errors: 5xx Error Ratio per Service (Caller perspective to catch 503 UO/UF/UH)
+          - record: service:istio_5xx_error_ratio:rate1m
+            expr: |
+              sum(rate(istio_requests_total{
+                reporter="source",
+                destination_service_namespace="orderflow",
+                response_code=~"5.*"
+              }[1m])) by (destination_service_name)
+              /
+              clamp_min(
+                sum(rate(istio_requests_total{
+                  reporter="source",
+                  destination_service_namespace="orderflow"
+                }[1m])) by (destination_service_name),
+                0.0001
+              )
+
+          # 3. Latency: P50, P95, P99 Destination Service Latency (ms)
+          - record: workload:istio_request_duration_ms:p50_rate1m
+            expr: |
+              histogram_quantile(0.50,
+                sum(rate(istio_request_duration_milliseconds_bucket{
+                  reporter="destination",
+                  destination_service_namespace="orderflow"
+                }[1m])) by (le, destination_service_name, destination_workload)
+              )
+
+          - record: workload:istio_request_duration_ms:p95_rate1m
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(istio_request_duration_milliseconds_bucket{
+                  reporter="destination",
+                  destination_service_namespace="orderflow"
+                }[1m])) by (le, destination_service_name, destination_workload)
+              )
+
+          - record: workload:istio_request_duration_ms:p99_rate1m
+            expr: |
+              histogram_quantile(0.99,
+                sum(rate(istio_request_duration_milliseconds_bucket{
+                  reporter="destination",
+                  destination_service_namespace="orderflow"
+                }[1m])) by (le, destination_service_name, destination_workload)
+              )
+
+          # 4. Network Overhead Delta: Source Latency minus Destination Latency (P95)
+          - record: service:istio_network_overhead_ms:p95_rate1m
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(istio_request_duration_milliseconds_bucket{
+                  reporter="source",
+                  destination_service_namespace="orderflow"
+                }[1m])) by (le, destination_service_name)
+              )
+              -
+              histogram_quantile(0.95,
+                sum(rate(istio_request_duration_milliseconds_bucket{
+                  reporter="destination",
+                  destination_service_namespace="orderflow"
+                }[1m])) by (le, destination_service_name)
+              )
+
+      - name: orderflow.istio.golden_signals.alerts
+        rules:
+          - alert: OrderFlowHigh5xxErrorRate
+            expr: service:istio_5xx_error_ratio:rate1m > 0.01
+            for: 2m
+            labels:
+              severity: critical
+              namespace: orderflow
+            annotations:
+              summary: "High 5xx error rate (>1%) on {{ $labels.destination_service_name }}"
+              description: "Service {{ $labels.destination_service_name }} in orderflow has a 5xx error ratio of {{ $value | humanizePercentage }} over the last 2 minutes."
+
+          - alert: OrderFlowHighP99Latency
+            expr: workload:istio_request_duration_ms:p99_rate1m > 500
+            for: 3m
+            labels:
+              severity: warning
+              namespace: orderflow
+            annotations:
+              summary: "High P99 latency (>500ms) on workload {{ $labels.destination_workload }}"
+              description: "Workload {{ $labels.destination_workload }} P99 latency is {{ $value }}ms."

@@ -1,0 +1,15 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: payment-error-only-logs
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  accessLogging:
+    - providers:
+        - name: envoy
+      filter:
+        # Only emit access logs when status code >= 400 OR an Envoy response flag (UO, UT, UH, FI, DI) is set
+        expression: "response.code >= 400 || response.flags != '-'"

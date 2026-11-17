@@ -1,0 +1,33 @@
+# Scenario 1: Broken Subset Causing 503 NR (No Route Configured)
+# The VirtualService routes 100% of payment-service traffic to subset 'v3',
+# which is missing from the DestinationRule.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-dr
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    - name: broken-canary-route
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v3
+          weight: 100

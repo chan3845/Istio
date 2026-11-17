@@ -1,0 +1,48 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-subsets
+  namespace: orderflow
+spec:
+  host: payment-service.orderflow.svc.cluster.local
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payment-service-fault
+  namespace: orderflow
+spec:
+  hosts:
+    - payment-service.orderflow.svc.cluster.local
+  http:
+    # Route 1: Header-triggered HTTP 500 abort for testing error handling
+    - match:
+        - headers:
+            x-Chaos-Mode:
+              exact: abort
+      fault:
+        abort:
+          percentage:
+            value: 100.0
+          httpStatus: 500
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1
+    # Route 2: Default route with 50% 3-second fixed delay fault injection
+    - fault:
+        delay:
+          percentage:
+            value: 50.0
+          fixedDelay: 3s
+      route:
+        - destination:
+            host: payment-service.orderflow.svc.cluster.local
+            subset: v1

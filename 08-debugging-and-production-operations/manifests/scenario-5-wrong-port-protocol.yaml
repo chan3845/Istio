@@ -1,0 +1,21 @@
+# Scenario 5: Protocol Sniffing Mismatch (HTTP/2 Forced on HTTP/1.1 Backend)
+# Naming the Service port 'grpc-web-inventory' or setting appProtocol: grpc
+# tricks Envoy into sending upstream HTTP/2 frames to a plain HTTP/1.1 server,
+# resulting in 503 UC (upstream_reset_before_response_started{protocol_error}).
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: orderflow
+  labels:
+    app: inventory-service
+    service: inventory-service
+spec:
+  selector:
+    app: inventory-service
+  ports:
+    # ❌ Misconfiguration: Port named 'grpc-inventory' on an HTTP/1.1 backend!
+    - name: grpc-inventory
+      appProtocol: grpc
+      port: 8080
+      targetPort: 8080
