@@ -1,5 +1,9 @@
 # Module 06: Progressive Delivery — Traffic Mirroring, Dark Launches, Canary & Blue-Green
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 07: Progressive Delivery & Traffic Shadowing](../fellowship/week-07-progressive-delivery-and-shadowing/WEEK.md)**.
+
 Deploying a new version of a critical service like `payment-service` or `order-service` is one of the highest-risk events in production operations. Most outages are not caused by infrastructure hardware failures—they are triggered by software deployments introducing regressions, schema incompatibilities, or latency spikes under real production load.
 
 **Progressive Delivery** decouples **code deployment** (starting containers in Kubernetes) from **traffic release** (exposing live users to those containers), allowing teams to validate new versions in production with blast-radius control and instant, zero-downtime rollback.

@@ -1,5 +1,9 @@
 # Module 07: Observability & Telemetry — Golden Signals, Custom Metrics, Structured Logging & Distributed Tracing
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 08: Telemetry, Golden Signals & Distributed Tracing](../fellowship/week-08-telemetry-and-distributed-tracing/WEEK.md)**.
+
 In a monolith, debugging a slow request or an unexpected exception means inspecting a single process's logs or attaching a profiler. In a microservices architecture like **OrderFlow**, a single user click traverses `frontend` $\rightarrow$ `order-service` $\rightarrow$ `payment-service` and `inventory-service`. When tail latency spikes or a `503` appears, teams need immediate answers to *where* the failure occurred and *why*.
 
 Because every inbound and outbound packet flows through the **Envoy sidecar proxy**, Istio acts as a **universal, language-agnostic telemetry sensor**. Without adding a single Prometheus client library or logging SDK to your application code, Istio emits uniform **Metrics**, **Access Logs**, and **Distributed Trace Spans** across the entire mesh.

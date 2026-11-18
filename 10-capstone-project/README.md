@@ -1,5 +1,9 @@
 # Module 10: Capstone Project — Architecting & Operating the "NovaPay" Multi-Namespace FinTech Production Mesh
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this capstone alongside **[Week 10: NovaPay Capstone Architecture & Defense](../fellowship/week-10-novapay-capstone-defense/WEEK.md)**.
+
 Welcome to the Capstone Project! Over the previous nine modules, you mastered Istio's control plane and data plane internals, progressive traffic management, resilience engineering, zero-trust security (`PeerAuthentication`, `RequestAuthentication`, `AuthorizationPolicy`), observability (`Telemetry`), Ambient Mode, and production war-room troubleshooting.
 
 Now you will bring **all six production pillars together** to architect, deploy, secure, and verify **NovaPay**—a multi-namespace, PCI-DSS segmented FinTech payment processing platform running inside your Kubernetes cluster.
@@ -97,6 +101,15 @@ Your implementation in `./manifests/` satisfies all six enterprise architecture 
 ---
 
 ## 3. Step-by-Step Deployment Guide
+
+### Pre-Flight Version Baseline Verification
+Before deploying NovaPay, confirm your cluster meets the **November 2026 Fellowship Version Baseline** (`Istio 1.32.0`, `Envoy v1.40`, `Kubernetes v1.36+`, `Gateway API v1.6.1`):
+
+```bash
+istioctl version
+kubectl get nodes
+kubectl get pods -n istio-system
+```
 
 ### Step 1: Create Namespaces, TLS Certificate, and `Sidecar` Boundaries
 Generate a self-signed TLS certificate for `api.novapay.internal` in `istio-system` (for the Ingress Gateway) and apply the namespace and `Sidecar` manifests:

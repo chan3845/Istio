@@ -1,5 +1,9 @@
 # Module 05: Network Resilience, Circuit Breaking & Fault Injection
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 06: Resilience Engineering & Chaos Testing](../fellowship/week-06-resilience-engineering-and-chaos/WEEK.md)**.
+
 In a distributed microservices architecture like **OrderFlow** (`frontend` $\rightarrow$ `order-service` $\rightarrow$ `payment-service` & `inventory-service`), network failures, GC pauses, noisy neighbors, and transient saturation are not edge cases—they are continuous operational realities.
 
 Traditionally, engineers embedded resilience libraries (such as Netflix Hystrix, Resilience4j, or Polly) directly inside application code. While functional, this approach breaks down in polyglot environments:

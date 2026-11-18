@@ -4,11 +4,17 @@ In this hands-on lab, you are the on-call Principal Mesh Engineer for the **Orde
 
 ---
 
-## Prerequisites & Baseline Check
+## Prerequisites & Version Baseline Pre-Flight Verification
 
-Ensure the `orderflow` baseline workloads from Module 02 (`frontend`, `order-service` `v1`/`v2`, `payment-service` `v1`/`v2`, `inventory-service` `v1`, and `client-toolbox`) are running and clean of leftover traffic policies:
+> **Version Baseline (November 2026)**: Istio `1.32.0` (with Canary Revision `1-32-canary`) | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 09: Production Operations & War-Room Debugging](../fellowship/week-09-production-operations-and-war-room/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+Ensure the `orderflow` baseline workloads from Module 02 (`frontend`, `order-service` `v1`/`v2`, `payment-service` `v1`/`v2`, `inventory-service` `v1`, and `client-toolbox`) are running on Istio `1.32.0` and clean of leftover traffic policies:
 
 ```bash
+# Verify Istio 1.32.0 control plane and client CLI
+istioctl version
+
 # Clean any leftover rules in orderflow before starting the war-room
 kubectl delete virtualservice,destinationrule,peerauthentication,authorizationpolicy,sidecar --all -n orderflow
 
@@ -340,11 +346,11 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
 
 ## Part 2: Zero-Downtime Revision-Based Canary Control Plane Upgrade
 
-Now that the `orderflow` platform is healthy, you will perform a zero-downtime canary control plane upgrade by running a second `istiod` revision (`1-24-canary`) alongside the default control plane, migrating `orderflow` workloads to it, and verifying xDS connectivity.
+Now that the `orderflow` platform is healthy, you will perform a zero-downtime canary control plane upgrade by running a second `istiod` revision (`1-32-canary`) alongside the default control plane, migrating `orderflow` workloads to it, and verifying xDS connectivity.
 
-### Step 1: Install the Canary Control Plane Revision (`1-24-canary`)
+### Step 1: Install the Canary Control Plane Revision (`1-32-canary`)
 ```bash
-istioctl install --set revision=1-24-canary --set profile=default -y
+istioctl install --set revision=1-32-canary --set profile=default -y
 ```
 Verify that two `istiod` deployments now run side-by-side in `istio-system`:
 ```bash
@@ -357,14 +363,14 @@ kubectl get mutatingwebhookconfigurations | grep istio
 ```
 
 ### Step 2: Migrate the `orderflow` Namespace to the Canary Revision
-Replace the legacy `istio-injection=enabled` label on `orderflow` with `istio.io/rev=1-24-canary`:
+Replace the legacy `istio-injection=enabled` label on `orderflow` with `istio.io/rev=1-32-canary`:
 ```bash
-kubectl label namespace orderflow istio-injection- istio.io/rev=1-24-canary --overwrite
+kubectl label namespace orderflow istio-injection- istio.io/rev=1-32-canary --overwrite
 ```
  Notice that relabeling the namespace does **not** immediately restart existing pods—this gives you full control over the blast radius.
 
 ### Step 3: Migrate Workloads Gradually & Verify Inter-Revision mTLS
-First, restart **only** `payment-service-v1` and `payment-service-v2` so that half of your mesh runs on the canary control plane (`istiod-1-24-canary`) while `frontend` and `order-service` remain on the original `istiod`:
+First, restart **only** `payment-service-v1` and `payment-service-v2` so that half of your mesh runs on the canary control plane (`istiod-1-32-canary`) while `frontend` and `order-service` remain on the original `istiod`:
 ```bash
 kubectl rollout restart deployment/payment-service-v1 deployment/payment-service-v2 -n orderflow
 kubectl rollout status deployment/payment-service-v1 deployment/payment-service-v2 -n orderflow
@@ -373,7 +379,7 @@ Run `istioctl proxy-status` to see proxies split across both control planes:
 ```bash
 istioctl proxy-status
 ```
-Notice how `payment-service-v1` and `v2` show `ISTIOD: istiod-1-24-canary-...`, while `order-service` and `frontend` remain on the original `istiod-...`!
+Notice how `payment-service-v1` and `v2` show `ISTIOD: istiod-1-32-canary-...`, while `order-service` and `frontend` remain on the original `istiod-...`!
 
 Verify that cross-revision mTLS traffic works with zero errors:
 ```bash
@@ -393,5 +399,5 @@ istioctl proxy-status
 kubectl label namespace orderflow istio.io/rev- istio-injection=enabled --overwrite
 kubectl rollout restart deployment -n orderflow
 kubectl rollout status deployment -n orderflow
-istioctl uninstall --revision=1-24-canary -y
+istioctl uninstall --revision=1-32-canary -y
 ```

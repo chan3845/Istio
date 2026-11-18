@@ -1,5 +1,16 @@
-# IstioOperator Configuration for the Hands-On Course Lab Cluster
-# Install with: istioctl install -f 00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml -y
+# IstioOperator Configuration for the Hands-On Course Lab Cluster (Istio 1.32.0)
+#
+# IMPORTANT ARCHITECTURAL NOTE (Istio 1.24 -> 1.32+):
+# The in-cluster IstioOperator controller was deprecated in Istio 1.23 and completely
+# removed in Istio 1.24. In Istio 1.32, this IstioOperator YAML resource is NEVER
+# reconciled by an in-cluster controller; it is strictly used as a declarative local
+# CLI input schema for `istioctl install -f`.
+#
+# For production GitOps deployments (ArgoCD / Flux), use the official Istio Helm charts
+# with `00-environment-setup/manifests/helm-values-prod.yaml`.
+#
+# Lab CLI Install Command:
+#   istioctl install -f 00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml -y
 apiVersion: install.istio.io/v1alpha1
 kind: IstioOperator
 metadata:

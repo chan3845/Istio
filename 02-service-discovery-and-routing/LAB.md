@@ -11,10 +11,15 @@ By the end of this lab, you will be able to:
 
 ---
 
-## Prerequisites
-- Kubernetes cluster with Istio installed and the `orderflow` namespace running from Module 00/01.
-- Clean up any leftover routing rules in `orderflow` before starting:
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 03: Service Discovery & L7 Traffic Routing](../fellowship/week-03-service-discovery-and-l7-routing/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+- Kubernetes `v1.36+` cluster with Istio `1.32.0` installed and the `orderflow` namespace running from Module 00/01.
+- Verify the Istio control plane version and clean up any leftover routing rules in `orderflow` before starting:
   ```bash
+  istioctl version
   kubectl delete virtualservice,destinationrule,sidecar --all -n orderflow
   ```
 

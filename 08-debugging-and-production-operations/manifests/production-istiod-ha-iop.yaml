@@ -1,6 +1,14 @@
-# Production-Grade High Availability IstioOperator Configuration
+# Production-Grade High Availability Istio 1.32.0 Control Plane Configuration
 # Demonstrates multi-replica istiod, HPA, PDB, zone anti-affinity,
-# native K8s sidecars, and graceful connection draining.
+# native K8s sidecars (GA in K8s 1.33+), and graceful connection draining.
+#
+# NOTE ON ISTIO 1.32 INSTALLATION ARCHITECTURE:
+# Because the in-cluster IstioOperator controller was deprecated in 1.23 and removed in 1.24,
+# this IstioOperator YAML is used strictly as a local CLI input file to:
+#   istioctl install -f 08-debugging-and-production-operations/manifests/production-istiod-ha-iop.yaml -y
+# (or `istioctl install --set revision=1-32-0`).
+# For declarative production GitOps (ArgoCD / Flux), use the official Istio Helm charts
+# (`helm install istiod istio/istiod --set revision=1-32-canary -f 00-environment-setup/manifests/helm-values-prod.yaml`).
 apiVersion: install.istio.io/v1alpha1
 kind: IstioOperator
 metadata:
@@ -8,7 +16,7 @@ metadata:
   namespace: istio-system
 spec:
   profile: default
-  revision: 1-24-canary
+  revision: 1-32-canary
   meshConfig:
     accessLogFile: /dev/stdout
     accessLogEncoding: JSON

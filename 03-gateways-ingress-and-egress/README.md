@@ -1,5 +1,9 @@
 # Module 03: Gateways, North-South Ingress, Kubernetes Gateway API & Controlled Egress
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 04: Edge Gateways & Controlled Egress](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)**.
+
 ## 1. North-South Traffic Architecture in Istio
 
 In Modules 01 and 02, we focused on **East-West** traffic (service-to-service communication inside the mesh). **North-South** traffic refers to traffic entering the cluster from outside (**Ingress**) or leaving the cluster to external APIs, SaaS providers, or legacy databases (**Egress**).
@@ -47,10 +51,14 @@ Istio supports three ways to configure North-South ingress traffic. Understandin
 | Feature | Kubernetes `Ingress` (`networking.k8s.io/v1`) | Istio Classic `Gateway` + `VirtualService` | **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) |
 | :--- | :--- | :--- | :--- |
 | **Design Era** | 2015 (Legacy) | 2018 (Istio-native) | **2023+ (Modern Standard & Istio Future Default)** |
-| **Role Separation** | Single monolithic resource mixes TLS, hostnames, and app paths. | Decouples L4/TLS (`Gateway`) from L7 Routing (`VirtualService`). | Decouples Infrastructure (`GatewayClass`), Cluster Ops (`Gateway`), and App Devs (`HTTPRoute`, `GRPCRoute`, `TLSRoute`). |
+| **Role Separation** | Single monolithic resource mixes TLS, hostnames, and app paths. | Decouples L4/TLS (`Gateway`) from L7 Routing (`VirtualService`). | Decouples Infrastructure (`GatewayClass`), Cluster Ops (`Gateway`), and App Devs (`HTTPRoute`, `GRPCRoute`, `TLSRoute`, `TCPRoute`, `UDPRoute`). |
 | **Vendor Portability** | Relies on vendor-specific `metadata.annotations` for anything beyond basic path routing. | Istio-specific CRDs (`networking.istio.io`). | Portable CNCF standard across Istio, Envoy Gateway, Cilium, GKE, Kong, NGINX. |
 | **Binding Direction** | Monolithic. | `VirtualService` references `gateways: [my-gw]` (Consumer points to Gateway). | Two-way handshake: `Gateway` defines `allowedRoutes` (which namespaces may attach), and `HTTPRoute` defines `parentRefs` (Producer + Consumer consent). |
 | **Gateway Pod Provisioning** | Requires pre-installed controller Deployment. | Requires pre-installed `istio-ingressgateway` Deployment matching `selector: {istio: ingressgateway}`. | **Automated Deployment Provisioning**: Creating a `Gateway` with `gatewayClassName: istio` automatically causes `istiod` to provision the Deployment & LoadBalancer Service! |
+
+> [!NOTE]
+> **Kubernetes Gateway API `v1.6.1` Milestone (`TCPRoute` & `UDPRoute` Graduation)**
+> In our **Gateway API `v1.6.1`** baseline (`standard-install.yaml`), **`TCPRoute` and `UDPRoute` have officially graduated to the Standard (`gateway.networking.k8s.io/v1`) channel**, joining `GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, and `ReferenceGrant`. You no longer need to install `experimental-install.yaml` for standard L4 TCP/UDP gateway routing in Istio `1.32.0`.
 
 ### 2.1 How Classic Istio `Gateway` + `VirtualService` Bind Together
 

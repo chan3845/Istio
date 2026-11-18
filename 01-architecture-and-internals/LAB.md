@@ -9,11 +9,16 @@ By the end of this lab, you will be able to:
 
 ---
 
-## Prerequisites
-- Kubernetes cluster running with Istio installed (including `ztunnel` and `istio-cni` if testing Ambient Mode) from Module 00.
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 02: Data Plane Internals & Ambient Mode](../fellowship/week-02-dataplane-internals-and-ambient/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+- Kubernetes `v1.36+` cluster running with Istio `1.32.0` installed (including `ztunnel` and `istio-cni` if testing Ambient Mode) from Module 00.
 - The `orderflow` namespace deployed with `frontend`, `order-service` (`v1`, `v2`), `payment-service` (`v1`, `v2`), `inventory-service` (`v1`), and `client-toolbox`.
-- Verify all pods in `orderflow` show `2/2` containers ready:
+- Run the pre-flight verification check to confirm your control plane version (`1.32.0`) and verify all pods in `orderflow` show `2/2` containers ready:
   ```bash
+  istioctl version
   kubectl get pods -n orderflow
   ```
 
@@ -76,9 +81,9 @@ kubectl get pod -n orderflow "$ORDER_POD" -o jsonpath='{range .spec.initContaine
 
 **Expected Output:**
 ```text
-InitContainer: istio-init (Image: docker.io/istio/proxyv2:1.2x.x, Capabilities: ["NET_ADMIN","NET_RAW"])
+InitContainer: istio-init (Image: docker.io/istio/proxyv2:1.32.0, Capabilities: ["NET_ADMIN","NET_RAW"])
 Container: order-service (Image: nicholasjackson/fake-service:v0.26.2, RunAsUser: )
-Container: istio-proxy (Image: docker.io/istio/proxyv2:1.2x.x, RunAsUser: 1337)
+Container: istio-proxy (Image: docker.io/istio/proxyv2:1.32.0, RunAsUser: 1337)
 ```
 > **Note**: If your cluster was installed with `istio-cni` enabled, the `initContainer` will be named `istio-validation` with **no** `NET_ADMIN` capability, and `RunAsUser: 1337` on `istio-proxy` remains identical!
 

@@ -1,5 +1,9 @@
 # Module 09: Production Readiness Checklists & Master Quick Reference
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 09: Production Operations & War-Room Debugging](../fellowship/week-09-production-operations-and-war-room/WEEK.md)**.
+
 Before promoting an Istio service mesh to handle live production customer traffic, Platform Engineering, Security, and SRE teams must verify that the control plane, data plane, traffic policies, zero-trust boundaries, and telemetry pipelines are hardened against real-world failure modes.
 
 Use the **7 Production Readiness Checklists** in Part 1 during architecture reviews and pre-launch audits, and keep the **Master `istioctl` & Envoy Reference Cheat Sheet** in Part 2 bookmarked for daily operations and incident response.
@@ -14,7 +18,7 @@ Use the **7 Production Readiness Checklists** in Part 1 during architecture revi
 - [ ] **Zone Anti-Affinity & PDB**: `istiod` pods are spread across availability zones (`topologyKey: topology.kubernetes.io/zone`) and protected by a `PodDisruptionBudget` (`minAvailable: 2`).
 - [ ] **Guaranteed Resource Requests**: `istiod` has production-sized CPU/memory requests (`>= 500m` CPU, `>= 2Gi` RAM) so the Kubernetes scheduler never places it on starved nodes or evicts it first under memory pressure.
 - [ ] **External / Offline Root CA Integration**: The default self-signed `istio-ca-secret` is replaced with an enterprise PKI intermediate CA (`cacerts` secret in `istio-system`) or integrated with **cert-manager** (`istio-csr`) / **HashiCorp Vault** / **Cloud CAS** so the Root CA private key never resides on the cluster.
-- [ ] **Revision-Based Installation**: `istiod` is installed with an explicit `revision` (e.g., `1-24-0`) rather than an unversioned in-place deployment, enabling canary control plane upgrades and instant namespace-level rollbacks.
+- [ ] **Revision-Based Installation**: `istiod` is installed via Helm (or `istioctl`) with an explicit `revision` (e.g., `1-32-0`) rather than an unversioned in-place deployment, enabling canary control plane upgrades from `1-31-0` to `1-32-0` and instant namespace-level rollbacks.
 - [ ] **Validation Webhook Active**: The `ValidatingWebhookConfiguration` (`istio-validator-istio-system`) is active with `failurePolicy: Fail` in production so malformed Istio CRDs are rejected at `kubectl apply` time.
 - [ ] **CI/CD Pre-Flight Validation**: All GitOps pipelines (ArgoCD / Flux / GitHub Actions) run `istioctl analyze` against candidate YAML manifests before merging to main.
 

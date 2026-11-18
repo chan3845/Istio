@@ -10,10 +10,15 @@ By the end of this lab, you will be able to:
 
 ---
 
-## Prerequisites
-- Kubernetes cluster with Istio installed and the `orderflow` namespace workloads running.
-- Ensure each workload in `orderflow` uses its dedicated `ServiceAccount` (`frontend-sa`, `order-sa`, `payment-sa`, `inventory-sa`, `toolbox-sa`):
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 05: Zero-Trust Security Architecture](../fellowship/week-05-zero-trust-security-architecture/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+- Kubernetes `v1.36+` cluster with Istio `1.32.0` installed and the `orderflow` namespace workloads running.
+- Run the pre-flight verification check to confirm your Istio version and verify each workload in `orderflow` uses its dedicated `ServiceAccount` (`frontend-sa`, `order-sa`, `payment-sa`, `inventory-sa`, `toolbox-sa`):
   ```bash
+  istioctl version
   kubectl get pods -n orderflow -o custom-columns="POD:.metadata.name,SA:.spec.serviceAccountName,READY:.status.containerStatuses[*].ready"
   ```
 

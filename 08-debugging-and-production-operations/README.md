@@ -1,5 +1,9 @@
 # Module 08: Debugging, Troubleshooting, and Production Operations
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` (Canary Upgrade from `1.31.0`) | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 09: Production Operations & War-Room Debugging](../fellowship/week-09-production-operations-and-war-room/WEEK.md)**.
+
 Operating a service mesh in enterprise production requires shifting from guesswork ("restart the pod and hope it works") to a deterministic, layered diagnostic methodology. Because Istio intercepts every packet via Envoy (`istio-proxy`) or `ztunnel` and programs those proxies asynchronously via `istiod` over xDS, failures almost always leave an exact, provable fingerprint in control plane validation, xDS synchronization state, Envoy access log response flags, or the compiled Envoy configuration dump.
 
 In this module, you will master the **5-Step Istio Troubleshooting Methodology**, decode every **Envoy Response Flag**, eliminate the most common **Production Operational Pitfalls** (protocol sniffing hangs, Kubernetes Job sidecar lifecycle deadlocks, and rolling deployment `503` race conditions), and execute **Zero-Downtime Revision-Based Canary Control Plane Upgrades**.
@@ -52,9 +56,9 @@ istioctl proxy-status
 Example output:
 ```text
 NAME                                                   CLUSTER        CDS        LDS        EDS        RDS          ECDS         ISTIOD                      VERSION
-frontend-6b7f8c9d4-x9k2p.orderflow                     Kubernetes     SYNCED     SYNCED     SYNCED     SYNCED       NOT SENT     istiod-7f8b9c6d5-m4n2q      1.24.0
-order-service-v1-84c9d7f5b-p2l9m.orderflow             Kubernetes     SYNCED     SYNCED     SYNCED     SYNCED       NOT SENT     istiod-7f8b9c6d5-m4n2q      1.24.0
-payment-service-v1-5d9c8b7f4-k8j3v.orderflow           Kubernetes     SYNCED     SYNCED     SYNCED     STALE (Never Acknowledged) istiod-7f8b9c6d5-m4n2q  1.24.0
+frontend-6b7f8c9d4-x9k2p.orderflow                     Kubernetes     SYNCED     SYNCED     SYNCED     SYNCED       NOT SENT     istiod-7f8b9c6d5-m4n2q      1.32.0
+order-service-v1-84c9d7f5b-p2l9m.orderflow             Kubernetes     SYNCED     SYNCED     SYNCED     SYNCED       NOT SENT     istiod-7f8b9c6d5-m4n2q      1.32.0
+payment-service-v1-5d9c8b7f4-k8j3v.orderflow           Kubernetes     SYNCED     SYNCED     SYNCED     STALE (Never Acknowledged) istiod-7f8b9c6d5-m4n2q  1.32.0
 ```
 
 - **`SYNCED`**: `istiod` sent the latest version of that xDS API (CDS/LDS/EDS/RDS) and Envoy replied with an `ACK`.
@@ -262,16 +266,16 @@ Never upgrade a production service mesh using an in-place upgrade (`istioctl upg
 ```mermaid
 flowchart TB
     subgraph CP["istio-system Namespace (Side-by-Side Control Planes)"]
-        IstiodOld["istiod-1-23-0<br/>Revision: 1-23-0 (Stable)"]
-        IstiodNew["istiod-1-24-0<br/>Revision: 1-24-0 (Canary)"]
+        IstiodOld["istiod-1-31-0<br/>Revision: 1-31-0 (N-1 Stable)"]
+        IstiodNew["istiod-1-32-0<br/>Revision: 1-32-0 (Canary)"]
     end
 
-    subgraph NS_Payments["Namespace: payments (istio.io/rev=1-23-0)"]
-        PayPod["payment-service<br/>Envoy v1.23.0"]
+    subgraph NS_Payments["Namespace: payments (istio.io/rev=1-31-0)"]
+        PayPod["payment-service<br/>Istio Proxy 1.31.0"]
     end
 
-    subgraph NS_Orders["Namespace: orderflow (Migrated: istio.io/rev=1-24-0)"]
-        OrdPod["order-service<br/>Envoy v1.24.0"]
+    subgraph NS_Orders["Namespace: orderflow (Migrated: istio.io/rev=1-32-0)"]
+        OrdPod["order-service<br/>Istio Proxy 1.32.0 (Envoy v1.40)"]
     end
 
     IstiodOld ===|"xDS & SDS (:15012)"| PayPod
@@ -281,15 +285,15 @@ flowchart TB
 
 #### How Revision-Based Canary Upgrades Work:
 1. **Install the New Control Plane Side-by-Side**:
-   When you install Istio with `--set revision=1-24-0`, Istio creates a second, independent deployment named `istiod-1-24-0`, a dedicated service `istiod-1-24-0.istio-system.svc`, and a revision-specific `MutatingWebhookConfiguration` (`istio-sidecar-injector-1-24-0`).
+   When you install Istio `1.32.0` with `--set revision=1-32-0` (or via Helm `--set revision=1-32-0`), Istio creates a second, independent deployment named `istiod-1-32-0`, a dedicated service `istiod-1-32-0.istio-system.svc`, and a revision-specific `MutatingWebhookConfiguration` (`istio-sidecar-injector-1-32-0`).
 2. **Zero Impact on Existing Workloads**:
-   Both `istiod` revisions share the same cluster Root CA (`istio-ca-secret` or external `cacerts` in `istio-system`) and watch the same Istio CRDs (`VirtualService`, `DestinationRule`, `AuthorizationPolicy`). Pods managed by `1-23-0` and pods managed by `1-24-0` communicate seamlessly over mTLS with zero disruption.
+   Both `istiod` revisions share the same cluster Root CA (`istio-ca-secret` or external `cacerts` in `istio-system`) and watch the same Istio CRDs (`VirtualService`, `DestinationRule`, `AuthorizationPolicy`). Pods managed by `1-31-0` and pods managed by `1-32-0` communicate seamlessly over mTLS with zero disruption.
 3. **Granular Workload Migration (Namespace by Namespace)**:
-   To migrate a namespace to the new revision, you update the namespace label from `istio.io/rev=1-23-0` (or `istio-injection=enabled`) to `istio.io/rev=1-24-0` and trigger a rolling restart (`kubectl rollout restart deployment -n orderflow`).
+   To migrate a namespace to the new revision, you update the namespace label from `istio.io/rev=1-31-0` (or `istio-injection=enabled`) to `istio.io/rev=1-32-0` and trigger a rolling restart (`kubectl rollout restart deployment -n orderflow`).
 4. **Instant Rollback**:
    If you observe elevated latency or errors on the canary revision, you simply flip the namespace label back to the old revision and run `kubectl rollout restart`. No control plane downgrade is required!
 5. **Decommission the Old Revision**:
-   Once `istioctl proxy-status` confirms zero proxies remain connected to the old `istiod` revision, you cleanly uninstall the old control plane revision (`istioctl uninstall --revision=1-23-0`).
+   Once `istioctl proxy-status` confirms zero proxies remain connected to the old `istiod` revision, you cleanly uninstall the old control plane revision (`istioctl uninstall --revision=1-31-0` or `helm uninstall istiod-1-31-0 -n istio-system`).
 
 ---
 

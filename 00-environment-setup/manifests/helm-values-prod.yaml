@@ -1,0 +1,98 @@
+# =============================================================================
+# Production-Grade Helm Values for Istio 1.32.0 (istiod chart)
+# =============================================================================
+# Authoritative Version Baseline (November 2026):
+#   - Istio Control Plane & Data Plane: 1.32.0 (Envoy v1.40)
+#   - Kubernetes Supported Window:      v1.33 - v1.37 (Baseline: v1.36 / v1.37)
+#   - Gateway API Standard Channel:     v1.6.1
+#
+# Installation Commands (Recommended Production / GitOps Standard):
+#   1. helm repo add istio https://istio-release.storage.googleapis.com/charts
+#      helm repo update
+#   2. helm install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default
+#   3. helm install istiod istio/istiod -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-prod.yaml
+#   4. (Optional Classic Gateways - or use Kubernetes Gateway API v1.6.1 automated deployment):
+#      helm install istio-ingressgateway istio/gateway -n istio-system --version 1.32.0
+# =============================================================================
+
+profile: default
+
+# Explicit revision tag for zero-downtime canary control plane upgrades (see Module 08)
+revision: ""
+
+pilot:
+  autoscaleEnabled: true
+  autoscaleMin: 3
+  autoscaleMax: 10
+  replicaCount: 3
+  cpu:
+    targetAverageUtilization: 70
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2048Mi
+    limits:
+      cpu: 2000m
+      memory: 4096Mi
+  env:
+    PILOT_ENABLE_STATUS: "true"
+    # Native Kubernetes sidecar containers (KEP-753, GA in K8s 1.33+) are enabled by default in Istio 1.32
+    ENABLE_NATIVE_SIDECARS: "true"
+    PILOT_ENABLE_PROTOCOL_SNIFFING_FOR_OUTBOUND: "true"
+  podAntiAffinityLabelSelector:
+    - key: app
+      operator: In
+      values: istiod
+      topologyKey: topology.kubernetes.io/zone
+
+pdb:
+  enabled: true
+  minAvailable: 2
+
+meshConfig:
+  # Structured JSON access logs for production SIEM / observability ingestion
+  accessLogFile: /dev/stdout
+  accessLogEncoding: JSON
+  # Lock down unknown external egress in production (use ALLOW_ANY only during initial lab onboarding)
+  outboundTrafficPolicy:
+    mode: ALLOW_ANY
+  enableTracing: true
+  defaultConfig:
+    # Graceful pod shutdown & connection draining to prevent 503 UC/UF during rolling updates
+    drainDuration: 45s
+    terminationDrainDuration: 30s
+    proxyMetadata:
+      ISTIO_META_DNS_CAPTURE: "true"
+      ISTIO_META_DNS_AUTO_ALLOCATE: "true"
+      EXIT_ON_ZERO_ACTIVE_CONNECTIONS: "true"
+    tracing:
+      sampling: 1.0 # 1% sampling in production (set to 100.0 in lab environments)
+  extensionProviders:
+    - name: jaeger
+      opentelemetry:
+        service: jaeger-collector.istio-system.svc.cluster.local
+        port: 4317
+    - name: envoy-json-logs
+      envoyFileAccessLog:
+        path: /dev/stdout
+        logFormat:
+          labels:
+            timestamp: "%START_TIME%"
+            client_ip: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            method: "%REQ(:METHOD)%"
+            path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+            protocol: "%PROTOCOL%"
+            response_code: "%RESPONSE_CODE%"
+            response_flags: "%RESPONSE_FLAGS%"
+            bytes_received: "%BYTES_RECEIVED%"
+            bytes_sent: "%BYTES_SENT%"
+            duration_ms: "%DURATION%"
+            upstream_service_time: "%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%"
+            upstream_host: "%UPSTREAM_HOST%"
+            upstream_cluster: "%UPSTREAM_CLUSTER%"
+            x_forwarded_for: "%REQ(X-FORWARDED-FOR)%"
+            user_agent: "%REQ(USER-AGENT)%"
+            request_id: "%REQ(X-REQUEST-ID)%"
+            authority: "%REQ(:AUTHORITY)%"
+            downstream_tls_cipher: "%DOWNSTREAM_TLS_CIPHER%"
+            spiffe_peer: "%DOWNSTREAM_PEER_URI_SAN%"

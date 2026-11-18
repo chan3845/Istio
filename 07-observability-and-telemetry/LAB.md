@@ -9,9 +9,14 @@ By the end of this hands-on lab, you will be able to:
 
 ---
 
-## Prerequisites
-Ensure the **OrderFlow** workloads are running in `orderflow`:
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 08: Telemetry, Golden Signals & Distributed Tracing](../fellowship/week-08-telemetry-and-distributed-tracing/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+Ensure Istio `1.32.0` and the **OrderFlow** workloads are running in `orderflow`:
 ```bash
+istioctl version
 kubectl get pods -n orderflow
 ```
 
@@ -55,11 +60,11 @@ flowchart TD
 If the standard Istio observability addons are not yet installed in `istio-system`, install them from your local Istio release directory (or upstream Istio addon manifests):
 
 ```bash
-# If istioctl / samples directory is available locally, or via standard upstream manifests:
-kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.24/samples/addons/prometheus.yaml
-kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.24/samples/addons/jaeger.yaml
-kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.24/samples/addons/grafana.yaml
-kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.24/samples/addons/kiali.yaml
+# If istioctl / samples directory is available locally, or via standard upstream release-1.32 manifests:
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/prometheus.yaml
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/jaeger.yaml
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/grafana.yaml
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/kiali.yaml
 
 kubectl rollout status deployment/prometheus -n istio-system
 kubectl rollout status deployment/jaeger -n istio-system

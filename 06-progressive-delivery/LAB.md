@@ -9,10 +9,15 @@ By the end of this hands-on lab, you will be able to:
 
 ---
 
-## Prerequisites
-Verify that `payment-service-v1`, `payment-service-v2`, and `client-toolbox` are running and healthy in the `orderflow` namespace:
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 07: Progressive Delivery & Traffic Shadowing](../fellowship/week-07-progressive-delivery-and-shadowing/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+Verify that Istio `1.32.0` is running and that `payment-service-v1`, `payment-service-v2`, and `client-toolbox` are healthy in the `orderflow` namespace:
 
 ```bash
+istioctl version
 kubectl get pods -n orderflow -l 'app in (payment-service,client-toolbox)' -L version
 ```
 

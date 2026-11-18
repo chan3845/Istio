@@ -1,5 +1,9 @@
 # Module 01: Istio Architecture, Envoy Internals & Dataplane Modes
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 02: Data Plane Internals & Ambient Mode](../fellowship/week-02-dataplane-internals-and-ambient/WEEK.md)**.
+
 ## 1. Why a Service Mesh Exists
 
 In a distributed microservices architecture like **OrderFlow**, every network call between `frontend`, `order-service`, `payment-service`, and `inventory-service` crosses an unreliable L3/L4 container network. Without a service mesh, application developers must embed resilience, security, and observability logic directly into every service using language-specific libraries (e.g., Netflix Hystrix/Resilience4j, gRPC interceptors, custom TLS reloaders):
@@ -250,6 +254,16 @@ Ambient Mode splits the mesh data plane into two distinct layers:
 | **L7 Hop Count & Latency** | **2 Envoys on every call** (Client Sidecar parses L7 + Server Sidecar parses L7), even if only L4 mTLS is needed. | **0 Envoys** if only L4 mTLS/Authz is used (`ztunnel` -> `ztunnel`). **1 Envoy** (Server Waypoint) when L7 policies are active. |
 | **Blast Radius** | **Single Pod.** If an Envoy sidecar crashes or OOMs, only that single pod replica is impacted. | **Node-wide (`ztunnel`) or Namespace-wide (`Waypoint`).** A bug or crash in `ztunnel` affects all ambient pods on that Kubernetes node. |
 | **Feature Completeness** | Supports 100% of legacy Istio features, client-side `EnvoyFilter` lua/Wasm customizations, and outbound client-specific overrides. | Waypoints are **destination-oriented (server-side)** proxies. Arbitrary client-side `EnvoyFilter` hacks are intentionally not supported on `ztunnel`. |
+
+### 5.4 Istio 1.32 Ambient Mode Enhancements & Cilium CNI Requirements
+
+In **Istio `1.32.0`**, Ambient Mode includes two critical production architecture advancements:
+1. **Multi-Network Ambient Support & Hybrid Sidecar/Ambient Gateways**:
+   Istio `1.32` supports multi-cluster, multi-network Ambient deployments via East-West HBONE Gateways (`:15008`), including **hybrid topologies that mix Sidecar namespaces and Ambient namespaces across networks**. Workloads enrolled in Ambient Mode (`ztunnel`) can seamlessly establish end-to-end SPIFFE mTLS over HBONE with sidecar-injected workloads and cross-network East-West gateways.
+2. **Cilium CNI Compatibility (`cni.exclusive=false` & `socketLB.hostNamespaceOnly=true`)**:
+   When running Istio `1.32` (especially Ambient Mode's in-pod `istio-cni` + `ztunnel` redirection) on a cluster with **Cilium CNI** and `kubeProxyReplacement=true`, you **must** configure Cilium with:
+   - `cni.exclusive=false` (so `istio-cni` can chain with Cilium's CNI configuration and configure in-pod netns sockets for `ztunnel`).
+   - `socketLB.hostNamespaceOnly=true` (so Cilium's eBPF socket load balancer does not intercept and rewrite ClusterIP connections inside application pod network namespaces before `ztunnel` or Envoy can capture them).
 
 ---
 

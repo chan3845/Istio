@@ -1,5 +1,9 @@
 # Module 04: Zero-Trust Security — SPIFFE Identity, mTLS (`PeerAuthentication`), JWT (`RequestAuthentication`) & `AuthorizationPolicy`
 
+> **Version & Fellowship Context**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 05: Zero-Trust Security Architecture](../fellowship/week-05-zero-trust-security-architecture/WEEK.md)**.
+
 ## 1. Why Zero-Trust Networking Is Essential in Kubernetes
 
 In traditional perimeter security ("castle-and-moat"), any workload inside the Kubernetes cluster network is implicitly trusted. Even when teams deploy Kubernetes `NetworkPolicy` (L3/L4 firewall rules implemented by the CNI), critical security gaps remain:
@@ -107,7 +111,7 @@ spec:
       app: order-service
   jwtRules:
     - issuer: "testing@secure.istio.io"
-      jwksUri: "https://raw.githubusercontent.com/istio/istio/release-1.24/security/tools/jwt/samples/jwks.json"
+      jwksUri: "https://raw.githubusercontent.com/istio/istio/release-1.32/security/tools/jwt/samples/jwks.json"
       # Or inline jwks: | ... for air-gapped / sandboxed environments!
       forwardOriginalToken: true
 ```
@@ -200,3 +204,28 @@ rules:
 1. **Between elements in the same list** (e.g., `methods: ["GET", "POST"]`, or multiple items in `rules: []`, `from: []`, `to: []`, `when: []`): **Logical OR**.
 2. **Between fields inside the same single object** (e.g., `from` + `to` + `when` inside a single `rules` item, or `principals` + `namespaces` inside a single `source` item): **Logical AND**.
    *(Exception: multiple items inside `when: []` under a single rule are combined with **Logical AND**).*
+
+### 5.4 Istio 1.32 Feature: `AuthorizationPolicy` Targeting Gateway API `HTTPRoute`
+
+In **Istio `1.32.0`** (with Kubernetes Gateway API `v1.6.1`), `AuthorizationPolicy` supports route-scoped attachment via `spec.targetRefs` directly targeting a Gateway API **`HTTPRoute`** (in addition to `Gateway` and `Service` targets). This allows application teams to attach L7 RBAC and JWT claim rules to their specific `HTTPRoute` without needing write permissions on the shared cluster `Gateway`:
+
+```yaml
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: orderflow-httproute-authz
+  namespace: orderflow
+spec:
+  targetRefs:
+    - kind: HTTPRoute
+      group: gateway.networking.k8s.io
+      name: orderflow-http-route
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            methods: ["GET", "POST"]
+      when:
+        - key: request.auth.claims[role]
+          values: ["customer", "admin"]
+```

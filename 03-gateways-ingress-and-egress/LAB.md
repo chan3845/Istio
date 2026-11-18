@@ -10,11 +10,16 @@ By the end of this lab, you will be able to:
 
 ---
 
-## Prerequisites
-- Kubernetes cluster with `istiod`, `istio-ingressgateway`, and `istio-egressgateway` installed in `istio-system`.
-  *(If `istio-egressgateway` is not yet deployed in `istio-system`, you can enable it via `istioctl install --set profile=demo --skip-confirmation` or `--set components.egressGateways[0].name=istio-egressgateway --set components.egressGateways[0].enabled=true`).*
-- Verify the gateway pods in `istio-system`:
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 04: Edge Gateways & Controlled Egress](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+- Kubernetes `v1.36+` cluster with `istiod` (`1.32.0`), `istio-ingressgateway`, and `istio-egressgateway` installed in `istio-system`.
+  *(If `istio-egressgateway` is not yet deployed in `istio-system`, you can enable it via `istioctl install -f 00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml -y` or `--set components.egressGateways[0].name=istio-egressgateway --set components.egressGateways[0].enabled=true`).*
+- Run the pre-flight verification check to confirm gateway pods and Gateway API `v1.6.1` CRDs:
   ```bash
+  istioctl version
   kubectl get pods -n istio-system -l 'istio in (ingressgateway, egressgateway)'
   ```
 
@@ -140,11 +145,11 @@ curl -s --resolve "orderflow.example.com:$SECURE_INGRESS_PORT:$INGRESS_HOST" \
 
 Now let's see how the Kubernetes Gateway API (`gateway.networking.k8s.io/v1`) replaces Istio's custom `Gateway` and `VirtualService` CRDs.
 
-Ensure the Kubernetes Gateway API CRDs are installed on your cluster:
+Ensure the Kubernetes Gateway API `v1.6.1` Standard CRDs are installed on your cluster:
 
 ```bash
 kubectl get crd gateways.gateway.networking.k8s.io >/dev/null 2>&1 || \
-  kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+  kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
 ```
 
 Create the TLS secret directly inside the `orderflow` namespace (because with Kubernetes Gateway API, our `Gateway` resource in `orderflow` references secrets in its own namespace!):

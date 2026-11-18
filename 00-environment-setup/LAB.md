@@ -8,12 +8,20 @@
 
 ---
 
-## Prerequisites
+## Prerequisites & Version Baseline (November 2026)
+
+> **Authoritative Version Baseline**:
+> - **Istio**: `1.32.0` (Envoy Proxy `v1.40`)
+> - **Kubernetes**: `v1.36+` (Supported window for Istio 1.32: `v1.33` – `v1.37`)
+> - **Kubernetes Gateway API**: `v1.6.1` (Standard channel — includes graduated `TCPRoute` and `UDPRoute`)
+> - **Fellowship Reference**: **[Week 01: Platform Onboarding](../fellowship/week-01-platform-onboarding/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
 Ensure the following CLI tools are installed on your workstation:
 - `docker` (running and accessible)
-- `kubectl` (v1.28+)
-- `kind` (v0.20+ — if running locally)
-- `istioctl` (v1.22+)
+- `kubectl` (`v1.36+`)
+- `kind` (`v0.27+` — if running locally)
+- `istioctl` (`v1.32.0`)
+- `helm` (`v3.17+` — for production Helm chart installation)
 - `jq` and `openssl` (for inspecting JSON outputs and TLS certificates)
 
 ---
@@ -35,10 +43,10 @@ kubectl get nodes -L topology.kubernetes.io/region,topology.kubernetes.io/zone,w
 **Expected Output:**
 ```text
 NAME                         STATUS   ROLES           AGE   VERSION   REGION      ZONE         WORKLOAD-TIER
-istio-course-control-plane   Ready    control-plane   45s   v1.31.0   <none>      <none>       <none>
-istio-course-worker          Ready    <none>          25s   v1.31.0   us-east-1   us-east-1a   general
-istio-course-worker2         Ready    <none>          25s   v1.31.0   us-east-1   us-east-1b   general
-istio-course-worker3         Ready    <none>          25s   v1.31.0   us-east-1   us-east-1c   pci
+istio-course-control-plane   Ready    control-plane   45s   v1.36.0   <none>      <none>       <none>
+istio-course-worker          Ready    <none>          25s   v1.36.0   us-east-1   us-east-1a   general
+istio-course-worker2         Ready    <none>          25s   v1.36.0   us-east-1   us-east-1b   general
+istio-course-worker3         Ready    <none>          25s   v1.36.0   us-east-1   us-east-1c   pci
 ```
 
 ---
@@ -56,7 +64,7 @@ istioctl x precheck
 ✔ No issues found when checking the cluster. Istio is safe to install or upgrade!
 ```
 
-Now install Istio using our customized `IstioOperator` specification:
+Now install Istio `1.32.0` using our customized `IstioOperator` CLI input specification (or use Helm with [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) in production GitOps pipelines):
 
 ```bash
 istioctl install -f 00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml -y
@@ -81,11 +89,11 @@ service/istio-ingressgateway   NodePort    10.96.230.15    <none>        15021:3
 service/istiod                 ClusterIP   10.96.45.12     <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP        45s
 ```
 
-Install the Kubernetes **Gateway API** CRDs as well (used in Modules 01 and 03):
+Install the Kubernetes **Gateway API `v1.6.1`** CRDs as well (used in Modules 01 and 03):
 
 ```bash
 kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
-  kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+  kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
 ```
 
 ---

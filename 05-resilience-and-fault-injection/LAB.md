@@ -9,10 +9,15 @@ By the end of this hands-on lab, you will be able to:
 
 ---
 
-## Prerequisites
-Ensure your Kubernetes cluster has Istio installed and the **OrderFlow** base workloads deployed in the `orderflow` namespace with sidecar injection enabled:
+## Prerequisites & Version Baseline Pre-Flight Verification
+
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Fellowship Reference**: **[Week 06: Resilience Engineering & Chaos Testing](../fellowship/week-06-resilience-engineering-and-chaos/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+
+Ensure your Kubernetes `v1.36+` cluster has Istio `1.32.0` installed and the **OrderFlow** base workloads deployed in the `orderflow` namespace with sidecar injection enabled:
 
 ```bash
+istioctl version
 kubectl get pods -n orderflow -l 'app in (frontend,order-service,payment-service,inventory-service,client-toolbox)'
 ```
 
