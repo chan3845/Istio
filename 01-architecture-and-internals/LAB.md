@@ -71,7 +71,7 @@ Now inspect the injected containers and security context of an `order-service-v1
 
 ```bash
 ORDER_POD=$(kubectl get pod -n orderflow -l app=order-service,version=v1 -o jsonpath='{.items[0].metadata.name}')
-kubectl get pod -n orderflow "$ORDER_POD" -o jsonpath='{range .spec.initContainers[*]}InitContainer: {.name} (Image: {.image}, Capabilities: {.securityContext.capabilities.add}){"\n"}{end}{range .spec.containers[*]}Container: {.name} (Image: {.image}, RunAsUser: {.securityContext.runAsUser}){"\n"}{end}'
+kubectl get pod -n orderflow "$ORDER_POD" -o jsonpath='{range .spec.initContainers[*]}InitContainer: {.name} (RunAsUser: {.securityContext.runAsUser}, Capabilities: {.securityContext.capabilities.add}){"\n"}{end}'
 ```
 
 **Expected Output:**
