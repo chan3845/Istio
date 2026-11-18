@@ -1,12 +1,22 @@
 # Module 10: Capstone Project — Architecting & Operating the "NovaPay" Multi-Namespace FinTech Production Mesh
 
-> **Version & Fellowship Context**
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 10: Capstone & Graduation Defense](../fellowship/week-10-capstone-and-graduation-defense/WEEK.md) > **Module 10: NovaPay Capstone Project**
 > - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
-> - **Fellowship Cohort 01 Mapping**: Complete this capstone alongside **[Week 10: NovaPay Capstone Architecture & Defense](../fellowship/week-10-novapay-capstone-defense/WEEK.md)**.
+> - **Fellowship Cohort 01 Mapping**: Complete this capstone alongside **[Week 10: Capstone & Graduation Defense](../fellowship/week-10-capstone-and-graduation-defense/WEEK.md)**.
+> - **Prerequisites**: Modules 01–09 (Review [Module 09 Production Readiness Checklists](../09-production-checklists-and-reference/README.md) before cutover).
 
-Welcome to the Capstone Project! Over the previous nine modules, you mastered Istio's control plane and data plane internals, progressive traffic management, resilience engineering, zero-trust security (`PeerAuthentication`, `RequestAuthentication`, `AuthorizationPolicy`), observability (`Telemetry`), Ambient Mode, and production war-room troubleshooting.
+> [!IMPORTANT]
+> **Execution Verification Status — End-to-End Automated Verification (`./verify-capstone.sh`)**
+> - All 6 production manifest bundles (`manifests/01-namespaces-and-sidecars.yaml` through `06-telemetry-and-observability.yaml`) and the automated verification suite [`./verify-capstone.sh`](./verify-capstone.sh) have been tested and validated against Istio `1.32.0` / Envoy `v1.40`.
 
-Now you will bring **all six production pillars together** to architect, deploy, secure, and verify **NovaPay**—a multi-namespace, PCI-DSS segmented FinTech payment processing platform running inside your Kubernetes cluster.
+---
+
+## Alex Morgan's Final Cutover Briefing: Welcome to the NovaPay Production Launch
+
+> **Alex Morgan (Senior Platform Engineer)**, **Maya Patel (Principal Security Engineer)**, **Sarah Chen (SRE Lead)** & **Daniel Brooks (Staff Backend Engineer)**:
+> "Over the past nine modules, you have progressed from understanding why a Layer 7 service mesh exists to debugging Envoy `v1.40` xDS filter chains, enforcing SPIFFE zero-trust boundaries, gating progressive releases on Golden Signals, and resolving live war-room outages in `orderflow` (our sandbox training ground).
+>
+> Today is graduation day. You are leading the production cutover of **NovaPay**—our multi-namespace, PCI-DSS segmented payment processing platform spanning `novapay` (the General Application Tier) and `novapay-pci` (the High-Security PCI-DSS Payment Vault Tier). Your deployment will be audited by [`./verify-capstone.sh`](./verify-capstone.sh) across all **6 Production Architecture Pillars**: `Sidecar` xDS isolation, `STRICT` mTLS + Default-Deny SPIFFE RBAC + JWT enforcement, North-South TLS Ingress + Egress TLS origination, Circuit Breaking + Outlier Detection, 80/20 Canary + VIP Header Routing + Asynchronous Shadow Mirroring, and 100% Trace & Custom Metric Telemetry."
 
 ---
 
@@ -14,12 +24,12 @@ Now you will bring **all six production pillars together** to architect, deploy,
 
 NovaPay is segmented into two isolated Kubernetes namespaces to satisfy strict financial compliance boundaries:
 1. **`novapay` (General Application Tier)**:
-   - **`api-gateway`** (`ServiceAccount: api-gateway-sa`, port `8080`): Entry point for external traffic arriving from `istio-ingressgateway`. Forwards validated requests to `checkout-service`.
+   - **`api-gateway`** (`ServiceAccount: api-gateway-sa`, port `8080`): Entry point for external traffic arriving from `istio-ingressgateway`. Validates end-user JWT tokens and forwards authorized requests to `checkout-service`.
    - **`checkout-service`** (`v1` and `v2`, `ServiceAccount: checkout-sa`, port `8080`): Orchestrates payment checkouts by calling `fraud-service` (in `novapay`) and `ledger-service` (across the namespace boundary in `novapay-pci`).
-   - **`fraud-service`** (`v1`, `ServiceAccount: fraud-sa`, port `8080`): Evaluates transaction risk and queries an external credit bureau API (`httpbin.org`) over TLS.
-   - **`client-tester`** (`ServiceAccount: client-tester-sa`): An internal testing pod (`curlimages/curl`) used to simulate both legitimate traffic and lateral-movement attacks inside the `novapay` namespace.
+   - **`fraud-service`** (`v1`, `ServiceAccount: fraud-sa`, port `8080`): Evaluates transaction risk and queries an external credit bureau API (`httpbin.org`) over Envoy-originated TLS (`:443`).
+   - **`client-tester`** (`ServiceAccount: client-tester-sa`): An internal testing pod (`curlimages/curl`) used to simulate both legitimate traffic and unauthorized lateral-movement attacks inside the `novapay` namespace.
 2. **`novapay-pci` (High-Security PCI-DSS Payment Vault Tier)**:
-   - **`ledger-service`** (`v1` and `v2`, `ServiceAccount: ledger-sa`, port `8080`): Records immutable financial ledger entries. **Only** `checkout-sa` from the `novapay` namespace is authorized to invoke `GET`/`POST` on `ledger-service`. `ledger-service` `v1` asynchronously mirrors 100% of live traffic to `ledger-service` `v2` for shadow validation.
+   - **`ledger-service`** (`v1` and `v2`, `ServiceAccount: ledger-sa`, port `8080`): Records immutable financial ledger entries. **Only** `checkout-sa` from the `novapay` namespace is authorized to invoke `GET`/`POST` on `ledger-service`. `ledger-service` `v1` asynchronously mirrors 100% of live traffic to `ledger-service` `v2` (`Host: *-shadow`) for shadow validation.
    - **`settlement-worker`** (`ServiceAccount: settlement-sa`): A background worker pod in the PCI zone used to verify that even pods *inside* `novapay-pci` cannot call `ledger-service` unless explicitly authorized by SPIFFE identity!
 
 ```mermaid
@@ -55,6 +65,26 @@ flowchart LR
     Attacker -.->|"403 RBAC: access denied"| LedgerV1
     Settlement -.->|"403 RBAC: access denied"| LedgerV1
 ```
+
+### 6-Part Mechanism Walkthrough: End-to-End NovaPay Transaction Lifecycle
+1. **What initiates the operation?**
+   An external merchant client sends an HTTPS request (`Host: api.novapay.internal`, `GET` or `POST /api/v1/checkout`) carrying a signed Bearer JWT token and an optional `x-priority-tier: platinum` header to `istio-ingressgateway` on port `443`.
+2. **Which component receives it?**
+   `istio-ingressgateway` terminates external TLS using the `novapay-tls-cert` credential and forwards the request over internal `STRICT` mTLS to `api-gateway` (`novapay`). `api-gateway`'s inbound Envoy proxy (`:15006`) validates the JWT signature against `RequestAuthentication` (`testing@secure.istio.io`) and enforces the `AuthorizationPolicy` requiring a valid `requestPrincipal` on `/api/v1/checkout*`.
+3. **What information is exchanged?**
+   `api-gateway` calls `checkout-service:8080`. `api-gateway`'s outbound Envoy (`:15001`) evaluates `checkout-service-vs`:
+   - If `x-priority-tier: platinum` is present, Rule 1 routes **100%** to `checkout-service-v2`.
+   - Otherwise, Rule 2 splits traffic **80% to `v1`** and **20% to `v2`** via `weighted_clusters`.
+   Next, `checkout-service` (`spiffe://cluster.local/ns/novapay/sa/checkout-sa`) fans out in parallel to `fraud-service.novapay` and across the namespace boundary to `ledger-service.novapay-pci`.
+4. **What changes in the system?**
+   - On the `fraud-service` branch, `fraud-service` queries the external credit bureau (`http://httpbin.org:80`), and its outbound Envoy proxy transparently originates TLS (`:443`) using the `ServiceEntry` + `DestinationRule` (`tls.mode: SIMPLE`).
+   - On the `ledger-service` (`novapay-pci`) branch, `checkout-service`'s outbound Envoy sends 100% of live traffic to `ledger-service-v1` while asynchronously mirroring 100% of requests (`request_mirror_policies`) to `ledger-service-v2` with `:authority` mutated to `ledger-service...:8080-shadow`.
+5. **How can you observe/verify it on your cluster?**
+   - Run `./verify-capstone.sh` to execute automated checks across all 6 pillars.
+   - Inspect `ledger-service-v2`'s `istio-proxy` logs (`kubectl logs -n novapay-pci -l app=ledger-service,version=v2 -c istio-proxy`) to observe the `-shadow` mirrored requests, and scrape `:15020/stats/prometheus` to verify the custom `priority_tier` metric tag.
+6. **What happens if a component fails or an attacker attempts lateral movement?**
+   - **Zero-Trust Lateral Movement Block**: If a compromised pod (`client-tester` in `novapay`, or even `settlement-worker` inside `novapay-pci`) attempts to call `fraud-service` or `ledger-service` directly, the destination inbound Envoy's RBAC filter rejects the request at Layer 7 with **`403 RBAC: access denied`** because the caller's X.509 SPIFFE SAN does not match `spiffe://cluster.local/ns/novapay/sa/checkout-sa`.
+   - **Resilience & Shadow Isolation**: If `ledger-service-v2` fails during shadow mirroring, `checkout-service` is unaffected (`200 OK` from `v1`). If `fraud-service` or `ledger-service-v1` experiences transient `5xx` errors or pod hangs, Envoy enforces a `3s` route timeout, `2` bounded retries (`perTryTimeout: 1s`), connection pool circuit breaking (`503 UO`), and `outlierDetection` pod ejection.
 
 ---
 
@@ -126,12 +156,12 @@ kubectl create secret tls novapay-tls-cert -n istio-system \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 2. Apply namespaces and Sidecar isolation boundaries
-kubectl apply -f manifests/01-namespaces-and-sidecars.yaml
+kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/01-namespaces-and-sidecars.yaml
 ```
 
 ### Step 2: Deploy All NovaPay & PCI Vault Workloads
 ```bash
-kubectl apply -f manifests/02-workloads.yaml
+kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/02-workloads.yaml
 
 # Wait for all deployments in novapay and novapay-pci to become Ready (2/2)
 kubectl rollout status deployment -n novapay --timeout=120s
@@ -140,22 +170,22 @@ kubectl rollout status deployment -n novapay-pci --timeout=120s
 
 ### Step 3: Apply Zero-Trust Security Policies (`STRICT` mTLS, Default-Deny, SPIFFE RBAC, & JWT)
 ```bash
-kubectl apply -f manifests/03-zero-trust-security.yaml
+kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/03-zero-trust-security.yaml
 ```
 
 ### Step 4: Apply North-South Ingress Gateway & Egress TLS Origination
 ```bash
-kubectl apply -f manifests/04-ingress-egress-gateways.yaml
+kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/04-ingress-egress-gateways.yaml
 ```
 
 ### Step 5: Apply Resilience Policies, Canary Routing & Traffic Mirroring
 ```bash
-kubectl apply -f manifests/05-resilience-and-routing.yaml
+kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/05-resilience-and-routing.yaml
 ```
 
 ### Step 6: Apply Production Telemetry Configuration
 ```bash
-kubectl apply -f manifests/06-telemetry-and-observability.yaml
+kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/06-telemetry-and-observability.yaml
 ```
 
 ---
@@ -165,8 +195,8 @@ kubectl apply -f manifests/06-telemetry-and-observability.yaml
 Run the automated Capstone Verification Script to validate all 6 production architecture pillars end-to-end:
 
 ```bash
-chmod +x verify-capstone.sh
-./verify-capstone.sh
+chmod +x /home/chan/Documents/Istio/10-capstone-project/verify-capstone.sh
+/home/chan/Documents/Istio/10-capstone-project/verify-capstone.sh
 ```
 
 ### What `verify-capstone.sh` Validates Automatically:
@@ -184,7 +214,7 @@ chmod +x verify-capstone.sh
 
 ---
 
-## 5. Capstone Grading Rubric
+## 5. Capstone Grading Rubric & Graduation Defense
 
 | Pillar | Verification Criteria | Weight |
 | :--- | :--- | :---: |

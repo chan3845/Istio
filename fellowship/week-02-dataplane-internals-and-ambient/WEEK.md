@@ -1,8 +1,17 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-01-platform-onboarding/WEEK.md) · **Week 02 of 10** · [Next Week ->](../week-03-service-discovery-and-l7-routing/WEEK.md)
+
 # Week 02 — Data Plane Internals, Envoy xDS & Ambient Mesh
 
 > **Phase 1: Foundations & Data Plane Internals** | **Cohort 01**
 > **Authoritative Baseline**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `1.36` / `1.37` | Gateway API `v1.6.1`
 > **Core Module Mapping**: [Module 01 — Architecture & Internals (`README.md`)](../../01-architecture-and-internals/README.md) & [Guided Lab (`LAB.md`)](../../01-architecture-and-internals/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 1 — Foundations & Data Plane Internals (Week 02 of 10)
+> - **Prerequisites**: Completed Week 01 (`istio-course` cluster running with Istio `1.32.0` and `orderflow` baseline pods `2/2 READY`)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: Full 4-layer Envoy xDS trace (`LDS -> RDS -> CDS -> EDS`) for `orderflow` plus a live `orderflow-batch` Ambient Mode namespace with `ztunnel` L4 mTLS and a Gateway API `istio-waypoint` L7 policy (`NP-102`)
 
 ---
 
@@ -80,7 +89,7 @@ Before locking in NovaPay's data plane architecture across both real-time paymen
 - Waypoint proxies must be provisioned declaratively using the standard Kubernetes Gateway API `v1.6.1` `Gateway` resource with `gatewayClassName: istio-waypoint`.
 
 #### Acceptance Criteria & Deliverables
-- [ ] Documented trace of the 4 xDS layers for `order-service:8080` from `api-gateway`'s Envoy proxy.
+- [ ] Documented trace of the 4 xDS layers for `order-service:8080` from `frontend`'s Envoy proxy.
 - [ ] Verified `ztunnel` DaemonSet running across all 4 cluster nodes and managing workload certificates for ambient pods.
 - [ ] Verified L4-only enforcement in `ztunnel` vs. L7 HTTP enforcement through a `Waypoint` proxy.
 
@@ -88,8 +97,14 @@ Before locking in NovaPay's data plane architecture across both real-time paymen
 
 ## Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### Assigned Core Reading
-Read the complete architectural reference in [**Module 01 — Architecture, xDS Internals & Ambient Mode (`README.md`)**](../../01-architecture-and-internals/README.md).
+### Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 01:
+- **Core Module Overview**: [**Module 01 — Architecture, xDS Internals & Ambient Mode (`README.md`)**](../../01-architecture-and-internals/README.md)
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 01.1: Control Plane (`istiod`) & Sidecar Injection](../../01-architecture-and-internals/lessons/01-control-plane-and-sidecar-injection.md)
+  2. [Lesson 01.2: Linux Network Namespaces & `iptables` Interception](../../01-architecture-and-internals/lessons/02-linux-netns-and-iptables-interception.md)
+  3. [Lesson 01.3: Envoy Proxy Internals & the xDS/ADS Pipeline](../../01-architecture-and-internals/lessons/03-envoy-xds-pipeline-and-ads.md)
+  4. [Lesson 01.4: Ambient Mode (`ztunnel`, HBONE & Waypoints)](../../01-architecture-and-internals/lessons/04-ambient-mode-ztunnel-and-waypoints.md)
 
 ### Alex's Guided Study Notes: What to Pay Attention to Under the Hood
 1. **Why UID `1337` Is the Linchpin of Sidecar Interception**:
@@ -132,7 +147,7 @@ flowchart TB
 ## Wednesday — Guided Labs & Internal Verification
 
 ### Step 1: Pre-Flight Check
-Verify your `istio-lab` cluster and `orderflow` baseline from Week 01 are healthy:
+Verify your `istio-course` cluster and `orderflow` baseline from Week 01 are healthy:
 
 ```bash
 kubectl get pods -n istio-system
@@ -151,12 +166,12 @@ Work through all exercises in [**Module 01 — Hands-On Lab (`LAB.md`)**](../../
 Run and verify these exact commands before moving to Thursday's assignment:
 
 ```bash
-# Checkpoint 1: Prove UID 1337 owns the envoy process inside api-gateway
-API_GW_POD=$(kubectl get pod -n orderflow -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$API_GW_POD" -c istio-proxy -- ps -o uid,pid,comm
+# Checkpoint 1: Prove UID 1337 owns the envoy process inside frontend
+FRONTEND_POD=$(kubectl get pod -n orderflow -l app=frontend -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$FRONTEND_POD" -c istio-proxy -- ps -o uid,pid,comm
 
 # Checkpoint 2: Trace the exact outbound Cluster name for payment-service:8080
-istioctl proxy-config route "$API_GW_POD.orderflow" --name 8080 -o json | jq -r '.[].virtualHosts[] | select(.name=="payment-service.orderflow.svc.cluster.local:8080") | .routes[0].route.cluster'
+istioctl proxy-config route "$FRONTEND_POD.orderflow" --name 8080 -o json | jq -r '.[].virtualHosts[] | select(.name=="payment-service.orderflow.svc.cluster.local:8080") | .routes[0].route.cluster'
 
 # Checkpoint 3: Verify ztunnel has fetched distinct SPIFFE certificates for ambient workloads
 istioctl ztunnel-config certificates
@@ -185,6 +200,16 @@ Maya Patel has approved running `orderflow-batch` in **Ambient Mode** to elimina
    - Method: `POST`
    - Path: `/api/v1/settle`
 5. Verify with `curl` from `settlement-runner` that `POST /api/v1/settle` returns `200 OK` and `GET /api/v1/settle` or `POST /admin` returns `403`.
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Ambient Enrollment Labels**: On `Namespace/orderflow-batch`, set `istio.io/dataplane-mode: ambient` and `istio.io/use-waypoint: batch-waypoint`. Do **not** set `istio-injection: enabled`—ambient pods must remain `1/1 Running`.
+> 2. **Waypoint Gateway Listener**: A Waypoint `Gateway` (`gateway.networking.k8s.io/v1`) uses `gatewayClassName: istio-waypoint` and requires a single listener: `name: mesh`, `port: 15008`, `protocol: HBONE`.
+> 3. **Why `targetRefs` Instead of `selector` in Ambient L7 `AuthorizationPolicy`?**: In Ambient Mode, pods don't have sidecars to evaluate L7 HTTP rules (`methods: ["POST"]`, `paths: ["/api/v1/settle"]`). Use `spec.targetRefs` pointing to `kind: Service, group: "", name: ledger-service` (or `kind: Gateway, group: gateway.networking.k8s.io, name: batch-waypoint`) so `istiod` programs the L7 RBAC filter onto the Waypoint proxy!
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -415,11 +440,11 @@ EOF
 kubectl rollout status deployment/tax-calculator-v1 -n orderflow
 ```
 
-Reproduce the `503 UF` failure from `load-generator`:
+Reproduce the `503 UF` failure from `client-toolbox`:
 
 ```bash
-LOADGEN_POD=$(kubectl get pod -n orderflow -l app=load-generator -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -i http://tax-calculator.orderflow.svc.cluster.local:8080/tax
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- curl -i http://tax-calculator.orderflow.svc.cluster.local:8080/tax
 ```
 
 ### Step 2: Diagnostic Clues & Investigation Prompts
@@ -431,6 +456,16 @@ kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -i http://tax
    ```
    Wait—what IP address does Envoy connect to when forwarding traffic from the `inbound|8080||` cluster to the application container inside the same pod? Is it `127.0.0.1:8080`, or is it the **Pod IP** (or why did `127.0.0.1` vs `0.0.0.0` matter)?
    *(Hint: Check `istioctl proxy-config cluster "$TAX_POD.orderflow" --fqdn "inbound|8080||" -o json` and check how `InboundPassthroughCluster` or `ORIGINAL_DST` behaves, or inspect the endpoint address!)*
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. Look closely at line 409 of the Python server startup command inside `Deployment/tax-calculator-v1`: `socketserver.TCPServer(("127.0.0.1", 8080), Handler)`.
+> 2. When a request arrives at `tax-calculator`'s `istio-proxy` on `:15006`, Envoy forwards the decrypted request to the **original destination IP (`<PodIP>:8080`)**, **not** `127.0.0.1:8080`! Because the Python process bound strictly to `127.0.0.1:8080`, the Linux kernel rejects connections addressed to `<PodIP>:8080` with `Connection Refused` (`503 UF`).
+> 3. What address should a containerized HTTP server bind to (`0.0.0.0` vs `127.0.0.1`) so Envoy can forward inbound traffic to it?
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>
@@ -457,7 +492,7 @@ kubectl patch deployment tax-calculator-v1 -n orderflow --type='json' \
 kubectl rollout status deployment/tax-calculator-v1 -n orderflow
 
 # Verify HTTP 200 OK through the mesh
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -i http://tax-calculator.orderflow.svc.cluster.local:8080/tax
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- curl -i http://tax-calculator.orderflow.svc.cluster.local:8080/tax
 
 # Clean up Friday incident & Thursday batch resources before Week 03
 kubectl delete deployment tax-calculator-v1 -n orderflow

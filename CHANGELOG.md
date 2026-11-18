@@ -4,6 +4,30 @@ All significant curriculum updates, Istio/Kubernetes version migrations, and API
 
 ---
 
+## [2.1.0] — 2026-11-18: Learning Experience Refinement & Modular Lesson Refactoring
+
+### 1. Decomposition of Oversized Modules into 23 Focused, Progressive Lessons
+To eliminate cognitive overload while preserving full engineering depth, Modules `01` through `08` were decomposed into 23 focused, 20–30 minute modular lessons (`0X-.../lessons/01-*.md`, etc.), with each module's `README.md` serving as the Module Synthesis & Milestone Hub:
+- **Module 01 (`01-architecture-and-internals/lessons/`)**: Split into 4 lessons (*Control Plane & Sidecar Injection*, *Linux Netns & `iptables` Interception*, *Envoy xDS Pipeline & ADS*, and *Ambient Mode: `ztunnel`, HBONE & Waypoints*).
+- **Module 02 (`02-service-discovery-and-routing/lessons/`)**: Split into 3 lessons (*K8s L4 Discovery vs. Istio EDS*, *`VirtualService`, `DestinationRule` & the Evaluation Order Trap*, and *Load Balancing Algorithms & `Sidecar` Scoping*).
+- **Module 03 (`03-gateways-ingress-and-egress/lessons/`)**: Split into 3 lessons (*North-South Gateways & Edge TLS Modes*, *Kubernetes Gateway API `v1.6.1`*, and *Zero-Trust Egress & TLS Origination*).
+- **Module 04 (`04-security-mtls-and-authz/lessons/`)**: Split into 3 lessons (*SPIFFE Identity & SDS Certificate Lifecycle*, *`PeerAuthentication` & mTLS Migration*, and *JWT Authn & `AuthorizationPolicy`*).
+- **Module 05 (`05-resilience-and-fault-injection/lessons/`)**: Split into 3 lessons (*Timeouts, Bounded Retries & Retry Storms*, *Circuit Breaking & Outlier Detection*, and *Chaos Fault Injection & Locality Failover*).
+- **Module 06 (`06-progressive-delivery/lessons/`)**: Split into 2 lessons (*Traffic Mirroring & Dark Launches*, and *Weighted Canary, Blue-Green & Argo Rollouts*).
+- **Module 07 (`07-observability-and-telemetry/lessons/`)**: Split into 3 lessons (*Envoy Telemetry & Dual-Reporter Metrics*, *`Telemetry` API & CEL Error-Only Logs*, and *Distributed Tracing & Context Propagation*).
+- **Module 08 (`08-debugging-and-production-operations/lessons/`)**: Split into 2 lessons (*5-Step Debugging Methodology & Envoy Response Flags*, and *Production Operational Pitfalls & Canary Control Plane Upgrades*).
+
+### 2. Mentor-Led Apprenticeship Flow & 6-Part Diagram Walkthroughs
+- Integrated **Alex Morgan's** mentorship (briefings, intuition analogies, production war stories, and challenges) alongside **Sarah Chen**, **Daniel Brooks**, and **Maya Patel** directly into the core technical modules and lessons.
+- Added structured **6-Part Mechanism Walkthroughs** (*What initiates it? Which component receives it? What information is exchanged? What changes in the system? How to observe it? What happens on failure?*) to architecture and sequence diagrams.
+- Added **4-Tier Progressive Disclosure** (*Core Concept* $\rightarrow$ *Technical Deep Dive* $\rightarrow$ *Engineering Insight* $\rightarrow$ *Advanced Exploration*), **Knowledge Checks**, and **Definitions of Done** across every lesson.
+
+### 3. Hands-On Lab Enhancements & Repository Quality Assurance
+- Added **"Predict Before You Execute"** prompts, **Progressive Troubleshooting Hints** (`Hint 1` $\rightarrow$ `Hint 2` $\rightarrow$ `Full Explanation`), **Execution Verification Status** callouts, **Production Considerations**, and **Cleanup Procedures** to all `LAB.md` files and weekly incident drills.
+- Resolved 15 relative link mismatches across `05`–`10` and `fellowship/week-10`, and unified `orderflow` workload/cluster naming in `fellowship/week-01` with `00-environment-setup/manifests/`.
+
+---
+
 ## [2.0.0] — 2026-11-18: Transformation into "Istio Service Mesh Engineering Fellowship — Cohort 01" & Istio `1.32.0` Modernization
 
 ### 1. Authoritative Version Baseline Modernization
@@ -15,17 +39,13 @@ All significant curriculum updates, Istio/Kubernetes version migrations, and API
 
 ### 2. Installation & API Modernization
 - **Removed In-Cluster `IstioOperator` References**: Clarified across Module 00 and Module 08 that the *in-cluster* Istio Operator controller was deprecated in `1.23` and removed in `1.24`. Added modern **Helm values (`helm-values-prod.yaml`)** alongside local CLI `istioctl install` configurations.
-- **Standardized `v1` Istio CRDs**: Verified that all 48+ YAML manifests use `networking.istio.io/v1`, `security.istio.io/v1`, `telemetry.istio.io/v1`, and `gateway.networking.k8s.io/v1`.
+- **Standardized `v1` Istio CRDs**: Verified that all 49 YAML manifests use `networking.istio.io/v1`, `security.istio.io/v1`, `telemetry.istio.io/v1`, and `gateway.networking.k8s.io/v1`.
 - **Addon & Sample URLs**: Updated observability addon references (`prometheus`, `jaeger`, `grafana`, `kiali`) and JWKS sample URLs from `release-1.24` to `release-1.32`.
 
 ### 3. Cohort-Based Engineering Fellowship Architecture
-- Created **`FELLOWSHIP_HANDBOOK.md`** defining the **Istio Service Mesh Engineering Fellowship — Cohort 01**, the continuous **NovaPay** FinTech storyline, and the recurring engineering team (**Alex Morgan**, **Sarah Chen**, **Daniel Brooks**, **Maya Patel**).
-- Created **`PROGRESSION_DASHBOARD.md`** providing a competency-based progression tracker, assignment checklist, incident postmortem log, and graduation defense rubric.
-- Created reusable engineering templates in **`fellowship/templates/`** (`ENGINEERING_TICKET_TEMPLATE.md`, `INCIDENT_POSTMORTEM_TEMPLATE.md`, `ARCHITECTURE_REVIEW_RFC_TEMPLATE.md`, `WEEKLY_ASSESSMENT_TEMPLATE.md`).
-- Created the **10-Week Cohort Curriculum (`fellowship/week-01/` through `fellowship/week-10/`)**, structuring every week into a 7-day engineering cadence (Monday Mentor Briefing $\rightarrow$ Tuesday Technical Lectures $\rightarrow$ Wednesday Guided Labs $\rightarrow$ Thursday Independent Engineering Assignment $\rightarrow$ Friday Incident Simulation $\rightarrow$ Saturday Architecture Review & Office Hours $\rightarrow$ Sunday Weekly Assessment & Reflection) seamlessly integrated with Modules `00`–`10`.
+- Created **`FELLOWSHIP_HANDBOOK.md`**, **`PROGRESSION_DASHBOARD.md`**, reusable templates in **`fellowship/templates/`**, and the **10-Week Cohort Curriculum (`fellowship/week-01/` through `fellowship/week-10/`)**.
 
 ---
 
 ## [1.0.0] — 2026-11-17: Initial Hands-On Istio Course Release
 - Created Modules `00` through `10` covering Istio architecture, Envoy internals, Ambient mode, traffic routing, Gateways, SPIFFE mTLS, `AuthorizationPolicy`, resilience, progressive delivery, `Telemetry` API, war-room debugging scenarios, production checklists, and the NovaPay capstone project.
-

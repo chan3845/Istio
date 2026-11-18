@@ -1,3 +1,5 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-06-resilience-and-chaos-engineering/WEEK.md) · **Week 07 of 10** · [Next Week ->](../week-08-observability-and-golden-signals/WEEK.md)
+
 # Week 07: Progressive Delivery, Traffic Mirroring & Safe Releases
 
 **Phase 3: Resilience & Progressive Delivery** | **Schedule**: Week 07 of 10  
@@ -5,6 +7,13 @@
 **Core Curriculum Links**:
 - 📖 **Technical Lecture**: [Module 06 — Progressive Delivery (`README.md`)](../../06-progressive-delivery/README.md)
 - 🧪 **Guided Hands-On Lab**: [Module 06 Lab — Traffic Mirroring, Dark Launches & Automated Canary Rollouts (`LAB.md`)](../../06-progressive-delivery/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 3 — Resilience & Progressive Delivery (Week 07 of 10)
+> - **Prerequisites**: Completed Week 06 (Multi-tier timeout budgets, `DestinationRule` circuit breakers, and `outlierDetection`)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: Unified 3-stage progressive delivery pipeline for `order-service` combining header dark-launch (`100% v2`), method-scoped shadow mirroring (`25%` on `GET`), and `85/15` weighted canary rollout (`NP-107`)
 
 ---
 
@@ -77,9 +86,12 @@ NovaPay is rolling out `order-service-v2` and `payment-service-v2`. Platform Eng
 
 ## 📅 Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### 📚 Assigned Core Reading
-Read the complete technical lecture for Module 06 before proceeding:
-👉 **[Module 06: Progressive Delivery — Technical Lecture (`../../06-progressive-delivery/README.md`)](../../06-progressive-delivery/README.md)**
+### 📚 Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 06 before proceeding:
+- 👉 **Core Module Overview**: **[Module 06: Progressive Delivery — Technical Lecture (`../../06-progressive-delivery/README.md`)](../../06-progressive-delivery/README.md)**
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 06.1: Asynchronous Traffic Mirroring (`-shadow`) & Dark Launches](../../06-progressive-delivery/lessons/01-traffic-mirroring-and-dark-launches.md)
+  2. [Lesson 06.2: Weighted Canary Rollouts, Blue-Green & Argo Rollouts](../../06-progressive-delivery/lessons/02-weighted-canary-blue-green-and-argo-rollouts.md)
 
 ### 📝 Alex Morgan's Guided Study Notes
 
@@ -241,6 +253,15 @@ done | sort | uniq -c
 ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Rule Ordering (Most Specific -> Least Specific)**: Put the `x-beta-merchant: "true"` header rule **first** (index `0`), the `method.exact: GET` mirroring rule **second** (index `1`), and the `85/15` catch-all canary split **last** (index `2`). Why? If `method.exact: GET` were placed above `x-beta-merchant: "true"`, a Beta Merchant sending a `GET` request would hit `v1` instead of `v2`!
+> 2. **Mirroring Syntax**: In Rule 2, `route` goes `100%` to `subset: v1`, while `mirror` points to `host: order-service.novapay.svc.cluster.local, subset: v2` with `mirrorPercentage: { value: 25.0 }`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -452,6 +473,15 @@ spec:
    ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. **Dead Route Ordering (`IST0129`)**: Look at `Route A` (`default-canary-90-10`) at index `0` of `payment-service-rollout`. Does `Route A` have a `match:` block? No! Because it has no `match:` block, it matches **100% of all requests** on the very first check, making `Route B` (`qa-dark-launch-v2`) and `Route C` (`experimental-v3-route`) completely unreachable!
+> 2. **Missing Subset (`IST0101`)**: Once you move the header matches above `default-canary-90-10`, look at `experimental-v3-route`: it routes to `subset: v3-experimental`, which is not defined in `DestinationRule/payment-service-subsets`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>

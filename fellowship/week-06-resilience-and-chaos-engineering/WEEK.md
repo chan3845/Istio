@@ -1,3 +1,5 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-05-zero-trust-security-architecture/WEEK.md) · **Week 06 of 10** · [Next Week ->](../week-07-progressive-delivery-and-safe-releases/WEEK.md)
+
 # Week 06: Resilience Engineering, Circuit Breaking & Chaos Testing
 
 **Phase 3: Resilience & Progressive Delivery** | **Schedule**: Week 06 of 10  
@@ -5,6 +7,13 @@
 **Core Curriculum Links**:
 - 📖 **Technical Lecture**: [Module 05 — Resilience and Fault Injection (`README.md`)](../../05-resilience-and-fault-injection/README.md)
 - 🧪 **Guided Hands-On Lab**: [Module 05 Lab — Timeouts, Retries, Circuit Breaking & Chaos (`LAB.md`)](../../05-resilience-and-fault-injection/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 3 — Resilience & Progressive Delivery (Week 06 of 10)
+> - **Prerequisites**: Completed Phase 2 (Weeks 04–05: Edge Gateways, Controlled Egress, `STRICT` mTLS & Zero-Trust `AuthorizationPolicy`)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: Hierarchical multi-tier timeout/retry `VirtualService` policies, `DestinationRule` circuit breakers (`connectionPool` + `outlierDetection`), and header-scoped chaos verification (`NP-106`)
 
 ---
 
@@ -80,9 +89,13 @@ NovaPay processes high-throughput checkout transactions across a 3-tier synchron
 
 ## 📅 Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### 📚 Assigned Core Reading
-Read the complete technical lecture for Module 05 before proceeding:
-👉 **[Module 05: Resilience and Fault Injection — Technical Lecture (`../../05-resilience-and-fault-injection/README.md`)](../../05-resilience-and-fault-injection/README.md)**
+### 📚 Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 05 before proceeding:
+- 👉 **Core Module Overview**: **[Module 05: Resilience and Fault Injection — Technical Lecture (`../../05-resilience-and-fault-injection/README.md`)](../../05-resilience-and-fault-injection/README.md)**
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 05.1: Timeouts, Bounded Retries & Stopping Retry Storms](../../05-resilience-and-fault-injection/lessons/01-timeouts-retries-and-retry-storms.md)
+  2. [Lesson 05.2: Circuit Breaking (`connectionPool`) & Outlier Detection](../../05-resilience-and-fault-injection/lessons/02-circuit-breaking-and-outlier-detection.md)
+  3. [Lesson 05.3: Chaos Fault Injection & Locality-Aware Failover](../../05-resilience-and-fault-injection/lessons/03-chaos-fault-injection-and-locality-failover.md)
 
 ### 📝 Alex Morgan's Guided Study Notes
 
@@ -271,6 +284,15 @@ done
 ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Single `VirtualService` per Host**: Do **not** create two separate `VirtualService` objects targeting `payment-service.novapay.svc.cluster.local` (that triggers `IST0109` conflicting route warnings). Instead, place two ordered route rules inside `payment-service-resilience`: Rule 1 matching `headers.x-chaos-test.exact: black-friday` (with the `fault` block attached), and Rule 2 as the catch-all production route!
+> 2. **Circuit Breaker + Panic Threshold**: In `DestinationRule.spec.trafficPolicy`, define `connectionPool` (`tcp` and `http`) alongside `outlierDetection` (`consecutive5xxErrors: 3`, `interval: 5s`, `baseEjectionTime: 30s`, `maxEjectionPercent: 50`, `minHealthPercent: 50`).
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -498,6 +520,15 @@ Run the following diagnostic commands to gather evidence before opening the RCA:
    ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. **Intra-Service Timeout Inversion**: In `order-service-resilience`, compare `timeout: 1.0s` against `retries.perTryTimeout: 2.0s`. In Envoy, `timeout` is the outer wall-clock deadline for the entire request including all retries! If `timeout` (`1.0s`) is smaller than `perTryTimeout` (`2.0s`), when does `frontend` cut off the request?
+> 2. **Cross-Hop Timeout Inversion**: Compare `frontend -> order-service` (`timeout: 1.0s`) against `order-service -> payment-service` (`timeout: 4.0s` with a `1.4s` fault delay). At `t = 1.0s`, `frontend` gives up with `504 UT`, while `order-service` and `payment-service` keep running until `t = 1.4s` and complete the charge!
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>

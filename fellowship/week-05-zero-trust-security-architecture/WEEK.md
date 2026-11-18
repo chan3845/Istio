@@ -1,8 +1,17 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-04-edge-gateways-and-controlled-egress/WEEK.md) · **Week 05 of 10** · [Next Week ->](../week-06-resilience-and-chaos-engineering/WEEK.md)
+
 # Week 05 — Zero-Trust Security Architecture (`mTLS`, `SPIFFE`, `JWT` & `AuthorizationPolicy`)
 
 > **Phase 2: Traffic Engineering, Security & Resilience** | **Cohort 01**
 > **Authoritative Baseline**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `1.36` / `1.37` | Gateway API `v1.6.1`
 > **Core Module Mapping**: [Module 04 — Security, mTLS & Authorization (`README.md`)](../../04-security-mtls-and-authz/README.md) & [Guided Lab (`LAB.md`)](../../04-security-mtls-and-authz/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 2 — Traffic Engineering, Security & Resilience (Week 05 of 10)
+> - **Prerequisites**: Completed Weeks 01–04 (Dedicated `ServiceAccount` SPIFFE identities across `orderflow` and North-South gateway setup)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: `STRICT` `PeerAuthentication`, default-deny `AuthorizationPolicy` (`allow-nothing`), explicit SPIFFE call-graph policies (`frontend-sa -> order-sa -> payment-sa / inventory-sa`), and OIDC JWT `RequestAuthentication` + `DENY` enforcement (`NP-105`)
 
 ---
 
@@ -42,14 +51,14 @@ By the end of Week 05, you will be able to:
 > Team, let's review the requirements for `NP-105`. Our PCI-DSS QSA requires proof of three controls in `orderflow`:
 > 1. **Cryptographic Transport (`PeerAuthentication`)**: `STRICT` mTLS across `orderflow`. If a rogue pod without a valid Istio SPIFFE certificate connects to any port in `orderflow`, the TCP/TLS handshake must be rejected immediately.
 > 2. **Least-Privilege Micro-Segmentation (`AuthorizationPolicy`)**: Default-deny (`allow-nothing`) across `orderflow`. Then we explicitly open only the legitimate call graph:
->    - `istio-ingressgateway` (or our Gateway API `Gateway`) -> `api-gateway`
->    - `api-gateway` -> `order-service`
->    - `order-service` -> `payment-service`, `fraud-service`, `notification-service`
->    Notice what is **forbidden**: `api-gateway` or `notification-service` must **never** be allowed to call `payment-service` directly!
+>    - `istio-ingressgateway` (or `client-toolbox`) -> `frontend`
+>    - `frontend` (`frontend-sa`) -> `order-service` (`order-sa`)
+>    - `order-service` (`order-sa`) -> `payment-service` (`payment-sa`) and `inventory-service` (`inventory-sa`)
+>    Notice what is **forbidden**: `frontend` or `inventory-service` must **never** be allowed to call `payment-service` directly!
 > 3. **End-User Identity (`RequestAuthentication` + JWT Claims)**: Calls to `/api/v1/orders` must carry a valid signed JWT, and administrative endpoints (`/admin/*`) must be blocked by an explicit `DENY` policy unless the JWT carries `role: admin` (or `pci-auditor`).
 
 > **Daniel Brooks (Staff Backend Engineer)** `09:05 AM`
-> Quick question, Maya. If we enable `RequestAuthentication` on `api-gateway` to verify the JWT signature against our OIDC JWKS keys, what happens when a caller sends a request **without** an `Authorization: Bearer <token>` header at all? Does `RequestAuthentication` reject unauthenticated requests with `401 Unauthorized`?
+> Quick question, Maya. If we enable `RequestAuthentication` on `frontend` or `order-service` to verify the JWT signature against our OIDC JWKS keys, what happens when a caller sends a request **without** an `Authorization: Bearer <token>` header at all? Does `RequestAuthentication` reject unauthenticated requests with `401 Unauthorized`?
 
 > **Alex Morgan (Senior Platform Engineer)** `09:08 AM`
 > Watch out, Daniel—that's the #1 misconception about `RequestAuthentication`!
@@ -72,15 +81,15 @@ By the end of Week 05, you will be able to:
 | **Priority** | P0 — PCI-DSS Audit Requirement |
 
 #### Business Context
-NovaPay must eliminate implicit trust inside the `orderflow` namespace. Even if an attacker compromises a peripheral service (such as `notification-service`) or deploys an uninjected pod in another namespace, they must be cryptographically blocked from communicating with `payment-service` or `order-service`.
+NovaPay must eliminate implicit trust inside the `orderflow` namespace. Even if an attacker compromises a peripheral service (such as `inventory-service` or `frontend`) or deploys an uninjected pod in another namespace (`legacy-uninjected`), they must be cryptographically blocked from communicating with `payment-service` or `order-service`.
 
 #### Technical Requirements
 1. **Enforce `STRICT` mTLS**:
    - Apply a `PeerAuthentication` policy in `orderflow` (and/or mesh-wide in `istio-system`) with `mtls.mode: STRICT`.
-   - Prove that a pod without a sidecar in an uninjected namespace (`legacy`) is rejected at the TLS handshake layer when calling `orderflow`.
+   - Prove that a pod without a sidecar in an uninjected namespace (`legacy-client` in `legacy-uninjected`) is rejected at the TLS handshake layer when calling `orderflow`.
 2. **Enforce Default-Deny & Explicit SPIFFE Call Graph**:
    - Apply an `allow-nothing` (`spec: {}`) `AuthorizationPolicy` in `orderflow`.
-   - Create explicit `ALLOW` `AuthorizationPolicy` resources for each `orderflow` service (`api-gateway`, `order-service`, `payment-service`, `fraud-service`, `notification-service`) restricting `from.source.principals` to the exact upstream caller's SPIFFE identity and restricting `to.operation.methods` and `paths`.
+   - Create explicit `ALLOW` `AuthorizationPolicy` resources for each `orderflow` service (`frontend`, `order-service`, `payment-service`, `inventory-service`) restricting `from.source.principals` to the exact upstream caller's SPIFFE identity (`frontend-sa`, `order-sa`, `toolbox-sa`) and restricting `to.operation.methods` and `paths`.
 3. **JWT Validation & Claim-Based Access Control**:
    - Configure a `RequestAuthentication` policy validating JWT tokens against Istio's test OIDC issuer (`testing@secure.istio.io`).
    - Require a valid JWT (`requestPrincipals: ["*"]`) and test Istio `1.32.0`'s route-scoped `AuthorizationPolicy` (`targetRefs` pointing to `HTTPRoute`).
@@ -90,16 +99,21 @@ NovaPay must eliminate implicit trust inside the `orderflow` namespace. Even if 
 - Verify all `from` / `to` / `when` list structures so no accidental `OR` conditions are introduced.
 
 #### Acceptance Criteria & Deliverables
-- [ ] Uninjected pods in `legacy` fail to connect to `orderflow` services (`Recv failure: Connection reset by peer` / exit code `56`).
-- [ ] Full checkout flow (`api-gateway -> order-service -> payment-service`) succeeds (`200 OK`), while direct calls from `api-gateway` or `notification-service` to `payment-service` are rejected with `403 RBAC: access denied`.
+- [ ] Uninjected pods in `legacy-uninjected` fail to connect to `orderflow` services (`Recv failure: Connection reset by peer` / exit code `56`).
+- [ ] Full checkout flow (`frontend -> order-service -> payment-service & inventory-service`) succeeds (`200 OK`), while direct calls from `frontend` or `inventory-service` to `payment-service` are rejected with `403 RBAC: access denied`.
 - [ ] Requests without a valid JWT are rejected with `403`, forged JWTs are rejected with `401`, and valid JWTs with authorized claims succeed (`200 OK`).
 
 ---
 
 ## Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### Assigned Core Reading
-Read the complete architectural reference in [**Module 04 — Zero-Trust Security, mTLS, SPIFFE & Authorization (`README.md`)**](../../04-security-mtls-and-authz/README.md).
+### Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 04:
+- **Core Module Overview**: [**Module 04 — Zero-Trust Security, mTLS, SPIFFE & Authorization (`README.md`)**](../../04-security-mtls-and-authz/README.md)
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 04.1: SPIFFE Cryptographic Identity & SDS Certificate Lifecycle](../../04-security-mtls-and-authz/lessons/01-spiffe-identity-and-sds-lifecycle.md)
+  2. [Lesson 04.2: Mutual TLS (`PeerAuthentication`) & Zero-Downtime Migration](../../04-security-mtls-and-authz/lessons/02-peer-authentication-and-mtls-migration.md)
+  3. [Lesson 04.3: End-User JWT (`RequestAuthentication`) & `AuthorizationPolicy`](../../04-security-mtls-and-authz/lessons/03-jwt-authn-and-authorization-policy.md)
 
 ### Alex's Guided Study Notes: What to Pay Attention to Under the Hood
 1. **`AuthorizationPolicy` Evaluation Order (`CUSTOM` -> `DENY` -> `ALLOW`)**:
@@ -114,22 +128,22 @@ Read the complete architectural reference in [**Module 04 — Zero-Trust Securit
 3. **The Deadly YAML Hyphen (`AND` vs. `OR` in `AuthorizationPolicy`)**:
    Look at the difference a single hyphen `-` makes:
    ```yaml
-   # CORRECT (AND logic): Caller must be order-service-sa AND method must be POST
+   # CORRECT (AND logic): Caller must be order-sa AND method must be POST
    rules:
      - from:
          - source:
-             principals: ["cluster.local/ns/orderflow/sa/order-service-sa"]
+             principals: ["cluster.local/ns/orderflow/sa/order-sa"]
        to:
          - operation:
              methods: ["POST"]
    ```
    vs.
    ```yaml
-   # BROKEN (OR logic!): Caller is order-service-sa (ANY method!) OR ANY caller using POST!
+   # BROKEN (OR logic!): Caller is order-sa (ANY method!) OR ANY caller using POST!
    rules:
      - from:
          - source:
-             principals: ["cluster.local/ns/orderflow/sa/order-service-sa"]
+             principals: ["cluster.local/ns/orderflow/sa/order-sa"]
      - to:
          - operation:
              methods: ["POST"]
@@ -170,7 +184,7 @@ istioctl proxy-status
 ### Step 2: Execute the Core Module Guided Lab
 Complete all exercises in [**Module 04 — Hands-On Lab (`LAB.md`)**](../../04-security-mtls-and-authz/LAB.md):
 1. Inspect active X.509 certificates and trust bundles via `istioctl proxy-config secret`.
-2. Transition `orderflow` from `PERMISSIVE` to `STRICT` mTLS and test from an uninjected `legacy` pod.
+2. Transition `orderflow` from `PERMISSIVE` to `STRICT` mTLS and test from the uninjected `legacy-client` pod in `legacy-uninjected`.
 3. Apply the `allow-nothing` default-deny policy and progressively unlock the `orderflow` SPIFFE call graph.
 4. Configure `RequestAuthentication` + JWT claim-based `AuthorizationPolicy` (including `DENY` overrides and Istio `1.32.0` `HTTPRoute` `targetRefs`).
 
@@ -198,14 +212,24 @@ Maya Patel has handed you the final PCI-DSS security controls specification for 
    - Enforce `PeerAuthentication` `STRICT` across the entire `orderflow` namespace.
    - Enforce an `allow-nothing` default-deny `AuthorizationPolicy` across `orderflow`.
 2. **Service-to-Service SPIFFE Call Graph (`ALLOW` Rules)**:
-   - `api-gateway`: Allow `GET` and `POST` on `/api/*` and `/healthz` from `load-generator-sa` (for internal synthetic monitoring) and `istio-ingressgateway-service-account` (in `istio-system`).
-   - `order-service`: Allow `GET` and `POST` on `/api/v1/orders*` and `/admin/*` **only** from `cluster.local/ns/orderflow/sa/api-gateway-sa`.
-   - `payment-service`, `fraud-service`, `notification-service`: Allow `POST` and `GET` **only** from `cluster.local/ns/orderflow/sa/order-service-sa`.
+   - `frontend`: Allow `GET` and `POST` on `/*` and `/healthz` from `toolbox-sa` (for internal synthetic monitoring) and `istio-ingressgateway-service-account` (in `istio-system`).
+   - `order-service`: Allow `GET` and `POST` on `/*`, `/api/v1/orders*`, and `/admin/*` **only** from `cluster.local/ns/orderflow/sa/frontend-sa` (and `toolbox-sa` for direct functional testing).
+   - `payment-service` and `inventory-service`: Allow `POST` and `GET` **only** from `cluster.local/ns/orderflow/sa/order-sa`.
 3. **JWT Authentication & Defense-in-Depth `DENY` Policy on `order-service`**:
    - Attach a `RequestAuthentication` resource `order-jwt-authn` to `order-service` validating tokens issued by `testing@secure.istio.io` (`jwksUri: https://raw.githubusercontent.com/istio/istio/release-1.32/security/tools/jwt/samples/jwks.json`) and setting `forwardOriginalToken: true`.
    - Attach an explicit **`action: DENY`** `AuthorizationPolicy` named `deny-order-admin-without-auditor-claim` to `order-service` that blocks any request to path prefix `/admin`:
      - **Condition 1**: If the request has **no** valid JWT (`notRequestPrincipals: ["*"]`), **OR**
      - **Condition 2**: If the JWT's `role` claim (`request.auth.claims[role]`) is **not** `pci-auditor` (`notValues: ["pci-auditor"]`).
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Exact SPIFFE ServiceAccount Names in `orderflow`**: Remember that in `00-environment-setup/manifests/base-platform.yaml`, the ServiceAccounts in `orderflow` are `frontend-sa`, `order-sa`, `payment-sa`, `inventory-sa`, and `toolbox-sa`!
+> 2. **Structuring the Two-Rule `DENY` Policy**: Why do you need **two** separate rules (`- from: ... to: ...` and `- to: ... when: ...`) inside `deny-order-admin-without-auditor-claim`? Because if a request arrives with **no JWT at all**, `request.auth.claims[role]` doesn't exist to be evaluated! Rule 1 (`notRequestPrincipals: ["*"]` on `/admin/*`) blocks unauthenticated requests, and Rule 2 (`when: [{ key: "request.auth.claims[role]", notValues: ["pci-auditor"] }]` on `/admin/*`) blocks authenticated requests that lack the `pci-auditor` role.
+> 3. **Evaluation Order**: Because `DENY` always runs before `ALLOW`, your `DENY` policy on `/admin/*` will automatically override `allow-order-service` unless the caller carries a valid `pci-auditor` JWT!
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -232,23 +256,23 @@ spec: {}
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
-  name: allow-api-gateway
+  name: allow-frontend
   namespace: orderflow
 spec:
   selector:
     matchLabels:
-      app: api-gateway
+      app: frontend
   action: ALLOW
   rules:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/orderflow/sa/load-generator-sa"
+              - "cluster.local/ns/orderflow/sa/toolbox-sa"
               - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
       to:
         - operation:
             methods: ["GET", "POST"]
-            paths: ["/api/*", "/healthz"]
+            paths: ["/*", "/healthz"]
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
@@ -264,11 +288,12 @@ spec:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/orderflow/sa/api-gateway-sa"
+              - "cluster.local/ns/orderflow/sa/frontend-sa"
+              - "cluster.local/ns/orderflow/sa/toolbox-sa"
       to:
         - operation:
             methods: ["GET", "POST"]
-            paths: ["/api/v1/orders*", "/admin/*"]
+            paths: ["/*", "/api/v1/orders*", "/admin/*"]
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
@@ -284,7 +309,7 @@ spec:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/orderflow/sa/order-service-sa"
+              - "cluster.local/ns/orderflow/sa/order-sa"
       to:
         - operation:
             methods: ["GET", "POST"]
@@ -292,37 +317,18 @@ spec:
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
-  name: allow-fraud-service
+  name: allow-inventory-service
   namespace: orderflow
 spec:
   selector:
     matchLabels:
-      app: fraud-service
+      app: inventory-service
   action: ALLOW
   rules:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/orderflow/sa/order-service-sa"
-      to:
-        - operation:
-            methods: ["GET", "POST"]
----
-apiVersion: security.istio.io/v1
-kind: AuthorizationPolicy
-metadata:
-  name: allow-notification-service
-  namespace: orderflow
-spec:
-  selector:
-    matchLabels:
-      app: notification-service
-  action: ALLOW
-  rules:
-    - from:
-        - source:
-            principals:
-              - "cluster.local/ns/orderflow/sa/order-service-sa"
+              - "cluster.local/ns/orderflow/sa/order-sa"
       to:
         - operation:
             methods: ["GET", "POST"]
@@ -372,19 +378,19 @@ spec:
 # 1. Apply the Zero-Trust Policy Suite
 kubectl apply -f np-105-zero-trust-solution.yaml
 
-# 2. Verify lateral movement is blocked: api-gateway calling payment-service directly MUST return 403!
-API_GW_POD=$(kubectl get pod -n orderflow -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$API_GW_POD" -c api-gateway -- \
+# 2. Verify lateral movement is blocked: client-toolbox calling payment-service directly MUST return 403!
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -s -o /dev/null -w "%{http_code}\n" http://payment-service.orderflow.svc.cluster.local:8080/pay
 # Expected output: 403
 
-# 3. Verify normal call from api-gateway -> order-service on /api/v1/orders succeeds (200 OK)
-kubectl exec -n orderflow "$API_GW_POD" -c api-gateway -- \
+# 3. Verify normal call from client-toolbox -> order-service on /api/v1/orders succeeds (200 OK)
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -s -o /dev/null -w "%{http_code}\n" http://order-service.orderflow.svc.cluster.local:8080/api/v1/orders
 # Expected output: 200
 
 # 4. Verify calling /admin/audit on order-service WITHOUT a JWT is blocked by the DENY rule (403 Forbidden)
-kubectl exec -n orderflow "$API_GW_POD" -c api-gateway -- \
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -s -o /dev/null -w "%{http_code}\n" http://order-service.orderflow.svc.cluster.local:8080/admin/audit
 # Expected output: 403
 ```
@@ -393,7 +399,7 @@ kubectl exec -n orderflow "$API_GW_POD" -c api-gateway -- \
 > *"Look closely at `deny-order-admin-without-auditor-claim`: why did we include TWO rules in that `DENY` policy?*
 > - *Rule 1 (`notRequestPrincipals: ["*"]` on `/admin/*`) catches requests that have **no JWT at all**.*
 > - *Rule 2 (`when: request.auth.claims[role] notValues: ["pci-auditor"]` on `/admin/*`) catches requests that **do** have a valid JWT, but where the `role` claim is either missing or set to something other than `pci-auditor`.*
-> *And because `DENY` policies are evaluated **before** `ALLOW` policies (`CUSTOM -> DENY -> ALLOW`), even though `allow-order-service` permits `api-gateway-sa` to call `/admin/*`, the `DENY` policy intercepts and blocks the call unless a valid `pci-auditor` JWT is present!"*
+> *And because `DENY` policies are evaluated **before** `ALLOW` policies (`CUSTOM -> DENY -> ALLOW`), even though `allow-order-service` permits `frontend-sa` and `toolbox-sa` to call `/admin/*`, the `DENY` policy intercepts and blocks the call unless a valid `pci-auditor` JWT is present!"*
 
 </details>
 
@@ -405,9 +411,9 @@ kubectl exec -n orderflow "$API_GW_POD" -c api-gateway -- \
 
 > **CRITICAL SECURITY INCIDENT — `#inc-05-payment-authz-bypass`**
 > **Incident Commander**: Maya Patel (Principal Security Engineer) & Sarah Chen (SRE Lead)
-> **Symptom**: Maya's automated continuous compliance scanner (`pci-canary-probe`, running inside `notification-service`) periodically attempts to call `http://payment-service.orderflow.svc.cluster.local:8080/pay` to verify that unauthorized pods receive `403 Forbidden`.
+> **Symptom**: Maya's automated continuous compliance scanner (`pci-canary-probe`, running inside `client-toolbox`) periodically attempts to call `http://payment-service.orderflow.svc.cluster.local:8080/pay` to verify that unauthorized pods receive `403 Forbidden`.
 >
-> Five minutes ago, after an engineer updated `allow-downstream-backends` (`AuthorizationPolicy` on `payment-service`), **the compliance probe returned `HTTP 200 OK`!** `notification-service`, `api-gateway`, and `load-generator` can all suddenly call `POST /pay` on `payment-service` directly!
+> Five minutes ago, after an engineer updated `allow-downstream-backends` (`AuthorizationPolicy` on `payment-service`), **the compliance probe returned `HTTP 200 OK`!** `inventory-service`, `frontend`, and `client-toolbox` can all suddenly call `POST /pay` on `payment-service` directly!
 
 ### Step 1: Inject the Broken State
 Run the following command to apply the engineer's flawed `AuthorizationPolicy` on `payment-service`:
@@ -428,7 +434,7 @@ spec:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/orderflow/sa/order-service-sa"
+              - "cluster.local/ns/orderflow/sa/order-sa"
     - to:
         - operation:
             methods: ["POST", "GET"]
@@ -439,11 +445,11 @@ spec:
 EOF
 ```
 
-Reproduce the security breach by calling `payment-service` directly from `notification-service` (which should be strictly forbidden!):
+Reproduce the security breach by calling `payment-service` directly from `client-toolbox` (which should be strictly forbidden!):
 
 ```bash
-NOTIF_POD=$(kubectl get pod -n orderflow -l app=notification-service -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$NOTIF_POD" -c notification-service -- \
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -i http://payment-service.orderflow.svc.cluster.local:8080/pay
 ```
 
@@ -452,15 +458,24 @@ Notice it returns **`HTTP/1.1 200 OK`**!
 ### Step 2: Diagnostic Clues & Investigation Prompts
 1. Inspect the YAML of `allow-downstream-backends` above. How many list items (hyphens `-`) exist directly under `spec.rules:`?
 2. Run `istioctl proxy-config listener <payment-pod>.orderflow --port 15006 -o json | jq '.. | .["envoy.filters.http.rbac"]? | select(. != null)'` and examine how Envoy compiled the `policies` map inside the HTTP RBAC filter!
-3. Why did `notification-service` match this policy even though its SPIFFE ID is `cluster.local/ns/orderflow/sa/notification-service-sa`?
+3. Why did `client-toolbox` match this policy even though its SPIFFE ID is `cluster.local/ns/orderflow/sa/toolbox-sa`?
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. Count the hyphens (`-`) directly under `spec.rules:` in `allow-downstream-backends`! There are **three** hyphens (`- from:`, `- to:`, `- when:`).
+> 2. In Istio's `AuthorizationPolicy` schema, each hyphen under `rules:` defines a **separate rule** combined with **`OR`** logic! What does a rule with `- to: { operation: { methods: ["POST", "GET"], paths: ["/pay*", "/healthz"] } }` and **no `from:` field** allow? It allows **every principal in the cluster** to call `/pay*`!
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>
 
 ### Root Cause Analysis (5-Whys)
-1. **Why was `notification-service` allowed to call `GET /pay` on `payment-service`?**
+1. **Why was `client-toolbox` allowed to call `GET /pay` on `payment-service`?**
    Because Envoy's HTTP RBAC filter matched the request against `rules[1]` (the second rule in `spec.rules`) of `allow-downstream-backends`.
-2. **Why did `rules[1]` allow `notification-service` without checking `source.principals`?**
+2. **Why did `rules[1]` allow `client-toolbox` without checking `source.principals`?**
    Look at the YAML indentation under `spec.rules:`:
    ```yaml
    rules:
@@ -471,7 +486,7 @@ Notice it returns **`HTTP/1.1 200 OK`**!
    The engineer placed a leading hyphen `-` before `from:`, a **second** leading hyphen `-` before `to:`, and a **third** leading hyphen `-` before `when:`!
 3. **What does a leading hyphen under `rules:` mean in Istio's `AuthorizationPolicy` schema?**
    Each item in the `rules:` list is an **independent `Rule` object** evaluated with boolean **`OR`** logic!
-   - **Rule 0 (`- from:`)** had a `from` block and NO `to` block -> *"Allow `order-service-sa` to call ANY method and ANY path."*
+   - **Rule 0 (`- from:`)** had a `from` block and NO `to` block -> *"Allow `order-sa` to call ANY method and ANY path."*
    - **Rule 1 (`- to:`)** had a `to` block and **NO `from` block** -> *"Allow **ANY caller in the entire universe** to call `POST`/`GET` on `/pay*` or `/healthz`!"*
    - **Rule 2 (`- when:`)** had a `when` block and **NO `from` or `to` block** -> *"Allow **ANY caller** on **ANY path** as long as the mTLS SNI matches `payment-service`!"*
 4. **How do we combine `from`, `to`, and `when` with boolean `AND` logic?**
@@ -496,25 +511,24 @@ spec:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/orderflow/sa/order-service-sa"
+              - "cluster.local/ns/orderflow/sa/order-sa"
       to:
         - operation:
             methods: ["POST", "GET"]
-            paths: ["/pay*", "/healthz"]
+            paths: ["/pay*", "/healthz", "/*"]
       when:
         - key: connection.sni
           values: ["outbound_.8080_._.payment-service.orderflow.svc.cluster.local"]
 EOF
 
-# Verify notification-service is immediately blocked with 403 RBAC: access denied!
-NOTIF_POD=$(kubectl get pod -n orderflow -l app=notification-service -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$NOTIF_POD" -c notification-service -- \
+# Verify client-toolbox is immediately blocked with 403 RBAC: access denied!
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -i http://payment-service.orderflow.svc.cluster.local:8080/pay
 
-# Verify order-service is still allowed (200 OK)
-ORDER_POD=$(kubectl get pod -n orderflow -l app=order-service,version=v1 -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$ORDER_POD" -c order-service -- \
-  curl -i http://payment-service.orderflow.svc.cluster.local:8080/pay
+# Verify end-to-end checkout via order-service is still allowed (200 OK)
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
+  curl -i http://order-service.orderflow.svc.cluster.local:8080/
 
 # Clean up Week 05 policies when finished so the cluster is ready for Week 06
 kubectl delete -f np-105-zero-trust-solution.yaml --ignore-not-found
@@ -546,7 +560,7 @@ kubectl delete -f np-105-zero-trust-solution.yaml --ignore-not-found
 
 **Q4: `source.principals` vs. `source.requestPrincipals`**
 > **Alex's Answer**:
-> - **`source.principals`** is the **workload identity** extracted from the peer's **X.509 mTLS certificate SAN** (`cluster.local/ns/orderflow/sa/order-service-sa`). It requires **mTLS**! If `PeerAuthentication` is `PERMISSIVE` and a caller connects in plaintext, `source.principals` is empty (`""`) and will fail to match any `source.principals` rule.
+> - **`source.principals`** is the **workload identity** extracted from the peer's **X.509 mTLS certificate SAN** (`cluster.local/ns/orderflow/sa/order-sa`). It requires **mTLS**! If `PeerAuthentication` is `PERMISSIVE` and a caller connects in plaintext, `source.principals` is empty (`""`) and will fail to match any `source.principals` rule.
 > - **`source.requestPrincipals`** is the **end-user identity** extracted from the **JWT token** (`<iss>/<sub>`, e.g., `testing@secure.istio.io/testing@secure.istio.io`).
 
 ---

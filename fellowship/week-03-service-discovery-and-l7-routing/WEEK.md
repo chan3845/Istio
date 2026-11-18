@@ -1,8 +1,17 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-02-dataplane-internals-and-ambient/WEEK.md) · **Week 03 of 10** · [Next Week ->](../week-04-edge-gateways-and-controlled-egress/WEEK.md)
+
 # Week 03 — Service Discovery, L7 Routing & Sidecar Scoping
 
 > **Phase 1: Foundations & Data Plane Internals** | **Cohort 01**
 > **Authoritative Baseline**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `1.36` / `1.37` | Gateway API `v1.6.1`
 > **Core Module Mapping**: [Module 02 — Service Discovery & Routing (`README.md`)](../../02-service-discovery-and-routing/README.md) & [Guided Lab (`LAB.md`)](../../02-service-discovery-and-routing/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 1 — Foundations & Data Plane Internals (Week 03 of 10)
+> - **Prerequisites**: Completed Week 02 (Fluency with Envoy `LDS -> RDS -> CDS -> EDS` pipeline and `istioctl proxy-config`)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: Production `DestinationRule` (`v1`/`v2` subsets, `LEAST_REQUEST`, and `consistentHash` ring-hash affinity), ordered multi-tier `VirtualService`, and namespace-wide `Sidecar` xDS memory scoping (`NP-103`)
 
 ---
 
@@ -92,8 +101,13 @@ NovaPay is preparing to test `order-service-v2` and `payment-service-v2` in `ord
 
 ## Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### Assigned Core Reading
-Read the complete architectural reference in [**Module 02 — Service Discovery, Subsets & L7 Routing (`README.md`)**](../../02-service-discovery-and-routing/README.md).
+### Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 02:
+- **Core Module Overview**: [**Module 02 — Service Discovery, Subsets & L7 Routing (`README.md`)**](../../02-service-discovery-and-routing/README.md)
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 02.1: Kubernetes L4 Discovery vs. Istio EDS L7 Routing](../../02-service-discovery-and-routing/lessons/01-k8s-l4-discovery-vs-istio-eds.md)
+  2. [Lesson 02.2: `VirtualService`, `DestinationRule` & the Evaluation Order Trap](../../02-service-discovery-and-routing/lessons/02-virtualservice-destinationrule-and-order-trap.md)
+  3. [Lesson 02.3: Load Balancing Algorithms & Mesh Scaling with `Sidecar`](../../02-service-discovery-and-routing/lessons/03-load-balancing-and-sidecar-scoping.md)
 
 ### Alex's Guided Study Notes: What to Pay Attention to Under the Hood
 1. **How `VirtualService` + `DestinationRule` Map to Envoy `RDS` + `CDS`**:
@@ -114,7 +128,7 @@ flowchart LR
         DR["DestinationRule\n(Subsets v1/v2, ConsistentHash)"]
     end
 
-    subgraph EnvoyXDS["Client Envoy Proxy (api-gateway)"]
+    subgraph EnvoyXDS["Client Envoy Proxy (frontend)"]
         RDS["RDS: RouteConfiguration (8080)\n1. Header x-user-tier=vip -> v2\n2. Default -> 90% v1 / 10% v2"]
         CDS1["CDS: outbound|8080|v1|order-service\n(LbPolicy: LEAST_REQUEST)"]
         CDS2["CDS: outbound|8080|v2|order-service\n(LbPolicy: LEAST_REQUEST)"]
@@ -154,16 +168,16 @@ Complete all exercises in [**Module 02 — Hands-On Lab (`LAB.md`)**](../../02-s
 Run these exact verification commands before moving to Thursday's assignment:
 
 ```bash
-# Checkpoint 1: Verify subset clusters exist in api-gateway's Envoy CDS
-API_GW_POD=$(kubectl get pod -n orderflow -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
-istioctl proxy-config cluster "$API_GW_POD.orderflow" --fqdn order-service.orderflow.svc.cluster.local
+# Checkpoint 1: Verify subset clusters exist in frontend's Envoy CDS
+FRONTEND_POD=$(kubectl get pod -n orderflow -l app=frontend -o jsonpath='{.items[0].metadata.name}')
+istioctl proxy-config cluster "$FRONTEND_POD.orderflow" --fqdn order-service.orderflow.svc.cluster.local
 
 # Checkpoint 2: Verify RDS route ordering (VIP header match MUST appear before the catch-all route)
-istioctl proxy-config route "$API_GW_POD.orderflow" --name 8080 -o json | \
+istioctl proxy-config route "$FRONTEND_POD.orderflow" --name 8080 -o json | \
   jq '.[] | .virtualHosts[] | select(.name=="order-service.orderflow.svc.cluster.local:8080") | .routes'
 
 # Checkpoint 3: Verify Sidecar CRD scoped out non-orderflow/non-istio-system services
-istioctl proxy-config cluster "$API_GW_POD.orderflow" | wc -l
+istioctl proxy-config cluster "$FRONTEND_POD.orderflow" | wc -l
 ```
 
 ---
@@ -186,6 +200,16 @@ Daniel and Sarah have finalized the routing specification for `NP-103` across `o
    - Define `VirtualService` `payment-service-vs` (`exportTo: ["."]`) routing `100%` of default traffic to subset `v1`, except requests with header `x-payment-rail: rtp` which route `100%` to subset `v2`.
 3. **Namespace xDS Memory Scoping**:
    - Define a `Sidecar` resource named `orderflow-default-sidecar` in `orderflow` (with no `workloadSelector`, so it applies to the entire namespace) restricting `egress.hosts` to `["./*", "istio-system/*"]`.
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **`AND` vs. `OR` in `VirtualService.http[].match`**: For Tier 1 (`x-qa-override: v2-only` **AND** URI prefix `/api/v1/orders`), make sure `headers:` and `uri:` are sibling keys inside the **same** list item (only one `-` under `match:`).
+> 2. **Response Header Injection**: Use `headers.response.set: { x-routed-tier: "..." }` inside each `http[]` route block to tag which tier matched the request.
+> 3. **Consistent Hashing Placement**: Put `trafficPolicy.loadBalancer.consistentHash.httpHeaderName: x-merchant-id` at the top level of `payment-service-dr` so both `v1` and `v2` subsets inherit ring-hash session affinity.
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -340,21 +364,21 @@ kubectl rollout status deployment/payment-service-v1 -n orderflow
 kubectl apply -f np-103-routing-solution.yaml
 
 # 2. Verify Tier 1 (QA dark launch), Tier 2 (VIP), and Tier 3 (Canary)
-LOADGEN_POD=$(kubectl get pod -n orderflow -l app=load-generator -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- \
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -s -D - -o /dev/null -H "x-qa-override: v2-only" http://order-service.orderflow.svc.cluster.local:8080/api/v1/orders | grep -i "x-routed-tier"
 
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- \
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
   curl -s -D - -o /dev/null -H "x-user-tier: vip" http://order-service.orderflow.svc.cluster.local:8080/api/v1/orders | grep -i "x-routed-tier"
 
-# 3. Verify Consistent Hash pinning on payment-service (all 5 requests for merch-9941 hit the SAME pod hostname!)
+# 3. Verify Consistent Hash pinning on payment-service (all 5 requests for merch-9941 hit the SAME pod IP/name!)
 for i in $(seq 1 5); do
-  kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- \
-    curl -s -H "x-merchant-id: merch-9941" http://payment-service.orderflow.svc.cluster.local:8080/pay | jq -r '.os.hostname'
+  kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- \
+    curl -s -H "x-merchant-id: merch-9941" http://payment-service.orderflow.svc.cluster.local:8080/pay | jq -r '.ip_addresses[0] // .name'
 done
 
-# 4. Return payment-service-v1 to 1 replica after verification
-kubectl scale deployment payment-service-v1 -n orderflow --replicas=1
+# 4. Return payment-service-v1 to 2 replicas after verification
+kubectl scale deployment payment-service-v1 -n orderflow --replicas=2
 ```
 
 ### Alex's Code Review
@@ -366,14 +390,14 @@ kubectl scale deployment payment-service-v1 -n orderflow --replicas=1
 
 ## Friday — Incident Simulation (`INC-03`)
 
-### PagerDuty Alert: `INC-03` — `503 NR` (`No Route`) Total Outage on `fraud-service`
+### PagerDuty Alert: `INC-03` — `503 NR` (`No Route`) Total Outage on `inventory-service`
 
-> **CRITICAL ALERT — `#inc-03-fraud-service-503-nr`**
+> **CRITICAL ALERT — `#inc-03-inventory-service-503-nr`**
 > **Incident Commander**: Sarah Chen (SRE Lead)
-> **Symptom**: A developer pushed an urgent hotfix release for `fraud-service` and applied a `VirtualService` to route traffic to `v2-hotfix` and `v1`. Immediately after `kubectl apply`, **100% of calls to `fraud-service` began failing with `HTTP 503 Service Unavailable`**, even though `fraud-service-v1` pods are `2/2 Running` and healthy!
+> **Symptom**: A developer pushed an urgent hotfix release for `inventory-service` and applied a `VirtualService` to route traffic to `v2-hotfix` and `v1`. Immediately after `kubectl apply`, **100% of calls to `inventory-service` began failing with `HTTP 503 Service Unavailable`**, even though `inventory-service-v1` pods are `2/2 Running` and healthy!
 >
 > Looking at `order-service`'s Envoy access logs shows:
-> `"GET /fraud-check HTTP/1.1" 503 NR via_upstream - "-" 0 0 0 - "-" "curl/8.12.1" ... "outbound|8080|v2-hotfix|fraud-service.orderflow.svc.cluster.local" -`
+> `"GET /check HTTP/1.1" 503 NR via_upstream - "-" 0 0 0 - "-" "curl/8.10.1" ... "outbound|8080|v2-hotfix|inventory-service.orderflow.svc.cluster.local" -`
 
 ### Step 1: Inject the Broken State
 Run the following command to apply the broken configuration that triggered the outage:
@@ -383,10 +407,10 @@ cat <<'EOF' | kubectl apply -f -
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: fraud-service-dr
+  name: inventory-service-dr
   namespace: orderflow
 spec:
-  host: fraud-service.orderflow.svc.cluster.local
+  host: inventory-service.orderflow.svc.cluster.local
   subsets:
     - name: v1
       labels:
@@ -395,57 +419,66 @@ spec:
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
-  name: fraud-service-vs
+  name: inventory-service-vs
   namespace: orderflow
 spec:
   hosts:
-    - fraud-service.orderflow.svc.cluster.local
+    - inventory-service.orderflow.svc.cluster.local
   http:
     - match:
         - headers:
-            x-fraud-mode:
+            x-inventory-mode:
               exact: strict
         - uri:
             prefix: /
       route:
         - destination:
-            host: fraud-service.orderflow.svc.cluster.local
+            host: inventory-service.orderflow.svc.cluster.local
             subset: v2-hotfix
           weight: 100
     - route:
         - destination:
-            host: fraud-service.orderflow.svc.cluster.local
+            host: inventory-service.orderflow.svc.cluster.local
             subset: v1
           weight: 100
 EOF
 ```
 
-Reproduce the outage from `load-generator`:
+Reproduce the outage from `client-toolbox`:
 
 ```bash
-LOADGEN_POD=$(kubectl get pod -n orderflow -l app=load-generator -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -i http://fraud-service.orderflow.svc.cluster.local:8080/check
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- curl -i http://inventory-service.orderflow.svc.cluster.local:8080/check
 ```
 
 ### Step 2: Diagnostic Clues & Investigation Prompts
-There are **two distinct bugs** in the YAML above that combined to cause a 100% outage instead of only affecting `x-fraud-mode: strict` requests:
-1. Run `istioctl analyze -n orderflow`. What error code (`IST0101`) is reported on `fraud-service-vs`?
-2. Why did a normal request (`curl http://fraud-service:8080/check` **without** the `x-fraud-mode: strict` header) get routed to `subset: v2-hotfix` instead of falling through to the second route (`subset: v1`)? Look closely at the `match:` array in `fraud-service-vs`!
+There are **two distinct bugs** in the YAML above that combined to cause a 100% outage instead of only affecting `x-inventory-mode: strict` requests:
+1. Run `istioctl analyze -n orderflow`. What error code (`IST0101`) is reported on `inventory-service-vs`?
+2. Why did a normal request (`curl http://inventory-service:8080/check` **without** the `x-inventory-mode: strict` header) get routed to `subset: v2-hotfix` instead of falling through to the second route (`subset: v1`)? Look closely at the `match:` array in `inventory-service-vs`!
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. **Clue 1 (`IST0101: Referenced subset not found`)**: In `inventory-service-vs`, Route 1 sends traffic to `subset: v2-hotfix`. Does `DestinationRule/inventory-service-dr` define a subset named `v2-hotfix`? What response flag does Envoy emit when an RDS route references a CDS subset cluster that doesn't exist?
+> 2. **Clue 2 (`AND` vs. `OR` in `match:`)**: Look at the two hyphens (`- headers:` and `- uri:`) under `match:` in `inventory-service-vs`. Because `- uri: { prefix: / }` is a separate list entry, Envoy evaluates the match as `(x-inventory-mode == strict) OR (uri startsWith /)`. Every HTTP URI starts with `/`!
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>
 
 ### Root Cause Analysis (5-Whys)
-1. **Why did `curl http://fraud-service:8080/check` return `503 NR` (`No Route`)?**
-   Because Envoy's `RouteConfiguration` (`RDS`) selected route #1, which directed the request to cluster `outbound|8080|v2-hotfix|fraud-service.orderflow.svc.cluster.local`—a cluster that **does not exist** in Envoy's `CDS` table!
-2. **Why did `outbound|8080|v2-hotfix|fraud-service...` not exist in Envoy's `CDS` table?**
-   Because `fraud-service-dr` (`DestinationRule`) only defined `subset: v1`. The developer forgot to add `subset: v2-hotfix` (or applied the `VirtualService` before updating the `DestinationRule`). When an `RDS` route points to a non-existent `CDS` cluster, Envoy immediately returns `503 NR`.
-3. **Why did a normal request WITHOUT `x-fraud-mode: strict` match route #1 in the first place?**
+1. **Why did `curl http://inventory-service:8080/check` return `503 NR` (`No Route`)?**
+   Because Envoy's `RouteConfiguration` (`RDS`) selected route #1, which directed the request to cluster `outbound|8080|v2-hotfix|inventory-service.orderflow.svc.cluster.local`—a cluster that **does not exist** in Envoy's `CDS` table!
+2. **Why did `outbound|8080|v2-hotfix|inventory-service...` not exist in Envoy's `CDS` table?**
+   Because `inventory-service-dr` (`DestinationRule`) only defined `subset: v1`. The developer forgot to add `subset: v2-hotfix` (or applied the `VirtualService` before updating the `DestinationRule`). When an `RDS` route points to a non-existent `CDS` cluster, Envoy immediately returns `503 NR`.
+3. **Why did a normal request WITHOUT `x-inventory-mode: strict` match route #1 in the first place?**
    Look at the YAML indentation in `match:`:
    ```yaml
       match:
         - headers:
-            x-fraud-mode:
+            x-inventory-mode:
               exact: strict
         - uri:
             prefix: /
@@ -462,10 +495,10 @@ cat <<'EOF' | kubectl apply -f -
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: fraud-service-dr
+  name: inventory-service-dr
   namespace: orderflow
 spec:
-  host: fraud-service.orderflow.svc.cluster.local
+  host: inventory-service.orderflow.svc.cluster.local
   subsets:
     - name: v1
       labels:
@@ -474,37 +507,37 @@ spec:
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
-  name: fraud-service-vs
+  name: inventory-service-vs
   namespace: orderflow
 spec:
   hosts:
-    - fraud-service.orderflow.svc.cluster.local
+    - inventory-service.orderflow.svc.cluster.local
   http:
     - match:
         - headers:
-            x-fraud-mode:
+            x-inventory-mode:
               exact: strict
           uri:
             prefix: /
       route:
         - destination:
-            host: fraud-service.orderflow.svc.cluster.local
+            host: inventory-service.orderflow.svc.cluster.local
             subset: v1
           weight: 100
     - route:
         - destination:
-            host: fraud-service.orderflow.svc.cluster.local
+            host: inventory-service.orderflow.svc.cluster.local
             subset: v1
           weight: 100
 EOF
 
 # Verify istioctl analyze is clean and HTTP 200 OK is restored
 istioctl analyze -n orderflow
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -i http://fraud-service.orderflow.svc.cluster.local:8080/check
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- curl -i http://inventory-service.orderflow.svc.cluster.local:8080/check
 
 # Clean up incident resources
-kubectl delete vs fraud-service-vs -n orderflow
-kubectl delete dr fraud-service-dr -n orderflow
+kubectl delete vs inventory-service-vs -n orderflow
+kubectl delete dr inventory-service-dr -n orderflow
 ```
 
 </details>

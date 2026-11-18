@@ -1,12 +1,18 @@
 # Module 09: Production Readiness Checklists & Master Quick Reference
 
-> **Version & Fellowship Context**
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 09: Incident Response & Control Plane Ops](../fellowship/week-09-incident-response-and-control-plane-ops/WEEK.md) > **Module 09: Production Readiness Checklists & Master Reference**
 > - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
-> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 09: Production Operations & War-Room Debugging](../fellowship/week-09-production-operations-and-war-room/WEEK.md)**.
+> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 09: Incident Response & Control Plane Ops](../fellowship/week-09-incident-response-and-control-plane-ops/WEEK.md)**.
+> - **Next Milestone**: **[Module 10: NovaPay Capstone Project](../10-capstone-project/README.md)**
 
-Before promoting an Istio service mesh to handle live production customer traffic, Platform Engineering, Security, and SRE teams must verify that the control plane, data plane, traffic policies, zero-trust boundaries, and telemetry pipelines are hardened against real-world failure modes.
+---
 
-Use the **7 Production Readiness Checklists** in Part 1 during architecture reviews and pre-launch audits, and keep the **Master `istioctl` & Envoy Reference Cheat Sheet** in Part 2 bookmarked for daily operations and incident response.
+## NovaPay Engineering Briefing: The Pre-Production Architecture Sign-Off
+
+> **Alex Morgan (Senior Platform Engineer)**, **Sarah Chen (SRE Lead)** & **Maya Patel (Principal Security Engineer)**:
+> "At **NovaPay**, no microservice or namespace is allowed to receive live PCI-DSS customer payment traffic until it passes our **7-Pillar Production Readiness Sign-Off**. Every single item in the checklists below was born from a real production outage or security audit finding across the FinTech industry—from forgotten unnamed MySQL ports (`5s` sniffing hangs) and un-scoped `Sidecar` CRDs ($O(N^2)$ Envoy OOMKills) to `PERMISSIVE` mTLS gaps and Prometheus cardinality explosions.
+>
+> Use **Part 1** as your mandatory pre-flight gate before launching the **Module 10 NovaPay Capstone Mesh** (and in your own enterprise architecture reviews), and bookmark **Part 2 (Master `istioctl` & Envoy Reference Cheat Sheet)** for your daily on-call incident response."
 
 ---
 
@@ -27,7 +33,7 @@ Use the **7 Production Readiness Checklists** in Part 1 during architecture revi
 ### 2. Data Plane (`istio-proxy` / `ztunnel`) Resource, Lifecycle & CNI Checklist
 
 - [ ] **Istio CNI Plugin Enabled**: `istio-cni` is deployed in production so application pods do **not** require a privileged `istio-init` container with `NET_ADMIN` / `NET_RAW` capabilities to program `iptables`.
-- [ ] **Native Kubernetes Sidecar Containers Enabled**: On Kubernetes 1.29+, `ENABLE_NATIVE_SIDECARS=true` is enabled so `istio-proxy` starts before main containers (eliminating startup connection race conditions) and terminates automatically when Kubernetes `Job` / `CronJob` containers finish.
+- [ ] **Native Kubernetes Sidecar Containers Enabled**: On Kubernetes `1.29+` / `1.36+`, `ENABLE_NATIVE_SIDECARS=true` (`KEP-753`) is enabled so `istio-proxy` starts before main containers (eliminating startup connection race conditions) and terminates automatically when Kubernetes `Job` / `CronJob` containers finish.
 - [ ] **Graceful Connection Draining**: `terminationDrainDuration` (`30s`+) and `EXIT_ON_ZERO_ACTIVE_CONNECTIONS: "true"` are configured in `meshConfig.defaultConfig`, paired with a `preStop: sleep 5` hook on application containers to eliminate `503 UC/UF` errors during rolling deployments.
 - [ ] **Per-Workload Proxy Sizing**: High-throughput services override default proxy CPU/memory requests and concurrency via `sidecar.istio.io/proxyCPU`, `sidecar.istio.io/proxyMemory`, and `proxy.istio.io/config` (`concurrency: 2` or `4`).
 - [ ] **Gateway Separation & Autoscaling**: `istio-ingressgateway` and `istio-egressgateway` run as standalone `Deployment` workloads (decoupled from the `istiod` lifecycle), scaled independently via HPA across availability zones with a `PodDisruptionBudget`.
@@ -68,9 +74,9 @@ Use the **7 Production Readiness Checklists** in Part 1 during architecture revi
 ### 6. Observability & Telemetry Checklist
 
 - [ ] **Structured JSON Access Logging**: Envoy access logs use `JSON` encoding (`accessLogEncoding: JSON`) with trace correlation fields (`x-b3-traceid` / `traceparent`), `%RESPONSE_FLAGS%`, `%RESPONSE_CODE_DETAILS%`, and `%UPSTREAM_CLUSTER%`.
-- [ ] **High-Volume Access Log Filtering**: High-QPS services use the `Telemetry` API with CEL filter expressions (`response.code >= 400 || response.duration > duration('500ms')`) to log errors and slow requests while saving disk/SIEM ingestion costs on healthy `200 OK` health checks.
+- [ ] **High-Volume Access Log Filtering**: High-QPS services use the `Telemetry` API with CEL filter expressions (`response.code >= 400 || response.flags != '-' || response.duration > duration('500ms')`) to log errors and slow requests while saving disk/SIEM ingestion costs on healthy `200 OK` health checks.
 - [ ] **Metric Cardinality Control**: Custom `Telemetry` metric tags never include unbounded high-cardinality values (such as user IDs, session IDs, UUIDs, or raw request URLs) that could crash Prometheus.
-- [ ] **Distributed Tracing Header Propagation**: Every application service propagates W3C (`traceparent`, `tracestate`) or B3 (`x-b3-traceid`, `x-b3-spanid`, `x-b3-sampled`) headers from inbound requests to outbound calls, and trace sampling in production is tuned (`1%` to `5%`).
+- [ ] **Distributed Tracing Header Propagation**: Every application service propagates W3C (`traceparent`, `tracestate`, `baggage`), Envoy (`x-request-id`), and B3 (`x-b3-traceid`, `x-b3-spanid`, `x-b3-sampled`) headers from inbound requests to outbound calls, and trace sampling in production is tuned (`0.1%` to `1.0%` head-based or OTel Collector tail-based).
 
 ---
 
@@ -147,3 +153,8 @@ Use the **7 Production Readiness Checklists** in Part 1 during architecture revi
 | **`URX`** | **Upstream Retry Limit Exceeded** | Look at the companion flag (`UF,URX` or `UT,URX`) to find why every retry attempt failed |
 | **`RL`** | **Rate Limited (`429`)** | Inspect `EnvoyFilter` local/external rate limit descriptors |
 | **`UAEX`** | **Unauthorized External (`401`/`403`)** | Inspect `CUSTOM` `AuthorizationPolicy` and external authz service logs |
+
+---
+
+## Next Step: Build & Defend the NovaPay Production Mesh
+Proceed to **[Module 10: Capstone Project — Architecting & Operating the "NovaPay" Multi-Namespace FinTech Production Mesh (`../10-capstone-project/README.md`)](../10-capstone-project/README.md)**.

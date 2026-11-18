@@ -1,8 +1,17 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-03-service-discovery-and-l7-routing/WEEK.md) · **Week 04 of 10** · [Next Week ->](../week-05-zero-trust-security-architecture/WEEK.md)
+
 # Week 04 — Edge Gateways, Gateway API & Controlled Egress
 
 > **Phase 2: Traffic Engineering, Security & Resilience** | **Cohort 01**
 > **Authoritative Baseline**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `1.36` / `1.37` | Gateway API `v1.6.1`
 > **Core Module Mapping**: [Module 03 — Gateways, Ingress & Egress (`README.md`)](../../03-gateways-ingress-and-egress/README.md) & [Guided Lab (`LAB.md`)](../../03-gateways-ingress-and-egress/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 2 — Traffic Engineering, Security & Resilience (Week 04 of 10)
+> - **Prerequisites**: Completed Phase 1 (Weeks 01–03: Envoy xDS internals, `VirtualService`, `DestinationRule`, and `Sidecar` scoping)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: North-South HTTPS edge ingress (`Gateway API v1.6.1`), `REGISTRY_ONLY` outbound lockdown (`BlackHoleCluster`), and external partner TLS origination via `ServiceEntry` + `istio-egressgateway` (`NP-104`)
 
 ---
 
@@ -11,7 +20,7 @@
 | Attribute | Specification |
 | :--- | :--- |
 | **Fellowship Role** | Platform Engineer — Service Mesh & Cloud-Native Networking Team |
-| **Business Context** | External merchants need HTTPS access to NovaPay's `api-gateway` in `orderflow`, and `payment-service` must call external card network settlement endpoints over HTTPS. For our PCI-DSS Level 1 audit, Maya Patel requires locking down all outbound cluster traffic (`REGISTRY_ONLY`) and funneling external partner calls through a dedicated `istio-egressgateway` with TLS origination. |
+| **Business Context** | External merchants need HTTPS access to NovaPay's `frontend` storefront in `orderflow`, and `payment-service` must call external card network settlement endpoints over HTTPS. For our PCI-DSS Level 1 audit, Maya Patel requires locking down all outbound cluster traffic (`REGISTRY_ONLY`) and funneling external partner calls through a dedicated `istio-egressgateway` with TLS origination. |
 | **Primary Namespace** | `orderflow` & `istio-system` |
 | **Engineering Ticket** | `NP-104`: Implement Gateway API `v1.6.1` TLS Ingress, Enforce `REGISTRY_ONLY`, and Route Partner Egress via Egress Gateway |
 | **Incident Simulation** | `INC-04`: Edge HTTPS Outage from Cross-Namespace TLS Secret Placement (`SDS` Failure) |
@@ -70,12 +79,12 @@ By the end of Week 04, you will be able to:
 | **Priority** | P0 — PCI-DSS Perimeter Compliance |
 
 #### Business Context
-NovaPay must expose `api-gateway` in `orderflow` over HTTPS (`https://orderflow.novapay.internal`) while locking down all unauthorized outbound internet access from the cluster and channeling external partner API traffic (`httpbin.org`) through `istio-egressgateway` with TLS origination.
+NovaPay must expose `frontend` in `orderflow` over HTTPS (`https://orderflow.novapay.internal`) while locking down all unauthorized outbound internet access from the cluster and channeling external partner API traffic (`httpbin.org`) through `istio-egressgateway` with TLS origination.
 
 #### Technical Requirements
 1. **North-South Edge Ingress**:
    - Provision a TLS X.509 certificate and Kubernetes `Secret` for `orderflow.example.com` / `orderflow.novapay.internal`.
-   - Expose `api-gateway:8080` via HTTPS using **both** classic Istio `Gateway` (on `istio-ingressgateway`) and Kubernetes Gateway API `v1.6.1` (`Gateway` + `HTTPRoute`).
+   - Expose `frontend:80` via HTTPS using **both** classic Istio `Gateway` (on `istio-ingressgateway`) and Kubernetes Gateway API `v1.6.1` (`Gateway` + `HTTPRoute`).
 2. **Outbound Lockdown (`REGISTRY_ONLY`)**:
    - Reconfigure `istiod` with `meshConfig.outboundTrafficPolicy.mode=REGISTRY_ONLY` and verify that unregistered external domains (`example.com`) are blocked with `502 Bad Gateway` (`UF,URX`).
 3. **Controlled Egress & TLS Origination via `istio-egressgateway`**:
@@ -95,8 +104,13 @@ NovaPay must expose `api-gateway` in `orderflow` over HTTPS (`https://orderflow.
 
 ## Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### Assigned Core Reading
-Read the complete architectural reference in [**Module 03 — Gateways, Ingress, Gateway API & Controlled Egress (`README.md`)**](../../03-gateways-ingress-and-egress/README.md).
+### Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 03:
+- **Core Module Overview**: [**Module 03 — Gateways, Ingress, Gateway API & Controlled Egress (`README.md`)**](../../03-gateways-ingress-and-egress/README.md)
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 03.1: North-South Gateways & Edge TLS Modes](../../03-gateways-ingress-and-egress/lessons/01-north-south-gateways-and-tls-modes.md)
+  2. [Lesson 03.2: Kubernetes Gateway API (`v1.6.1`) Architecture](../../03-gateways-ingress-and-egress/lessons/02-kubernetes-gateway-api.md)
+  3. [Lesson 03.3: Zero-Trust Egress (`REGISTRY_ONLY`), TLS Origination & Egress Gateways](../../03-gateways-ingress-and-egress/lessons/03-zero-trust-egress-and-tls-origination.md)
 
 ### Alex's Guided Study Notes: What to Pay Attention to Under the Hood
 1. **How Istio `1.32.0` Automates Gateway Deployment for Kubernetes Gateway API**:
@@ -159,8 +173,8 @@ INGRESS_POD=$(kubectl get pod -n istio-system -l app=istio-ingressgateway -o jso
 istioctl proxy-config secret "$INGRESS_POD.istio-system"
 
 # Checkpoint 2: Verify BlackHoleCluster is active on orderflow pods when REGISTRY_ONLY is enabled
-LOADGEN_POD=$(kubectl get pod -n orderflow -l app=load-generator -o jsonpath='{.items[0].metadata.name}')
-istioctl proxy-config route "$LOADGEN_POD.orderflow" --name 80 -o json | grep -A 3 "BlackHoleCluster"
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+istioctl proxy-config route "$TOOLBOX_POD.orderflow" --name 80 -o json | grep -A 3 "BlackHoleCluster"
 
 # Checkpoint 3: Verify istio-egressgateway has the outbound|443||httpbin.org cluster with TLS context
 EGRESS_POD=$(kubectl get pod -n istio-system -l app=istio-egressgateway -o jsonpath='{.items[0].metadata.name}')
@@ -171,16 +185,26 @@ istioctl proxy-config cluster "$EGRESS_POD.istio-system" --fqdn httpbin.org -o j
 
 ## Thursday — Independent Engineering Assignment
 
-### Scenario: Gateway API Canary Edge Routing & External Fraud-Scoring TLS Origination
+### Scenario: Gateway API Canary Edge Routing & External Supplier Audit TLS Origination
 Daniel and Maya have signed off on the edge and egress design for `orderflow`:
 1. **North-South Edge (Gateway API `v1.6.1`)**:
    - Provision a Kubernetes Gateway API `Gateway` named `novapay-edge-gw` in `orderflow` (`gatewayClassName: istio`) terminating HTTPS on port `443` for hostname `api.novapay.internal` using a TLS Secret named `novapay-edge-tls` in `orderflow`.
    - Create an `HTTPRoute` named `novapay-orders-route` in `orderflow` attached to `novapay-edge-gw` for hostname `api.novapay.internal`:
      - Requests matching path prefix `/api/v2/orders` OR carrying header `x-canary-edge: v2` must route directly to `order-service` (port `8080`) with request header `x-user-tier: vip` injected at the gateway!
-     - All other requests matching `/api/v1/orders` route to `api-gateway` (port `8080`).
-2. **External Fraud Bureau Egress (`ServiceEntry` + TLS Origination)**:
-   - Under `REGISTRY_ONLY`, `fraud-service` needs to call an external fraud-scoring endpoint (`postman-echo.com`) using plaintext `http://postman-echo.com/get?merchant=novapay` on port `80`, while Envoy transparently originates HTTPS (`TLS SIMPLE`) to `postman-echo.com:443`.
+     - All other requests matching `/api/v1/orders` route to `frontend` (port `80`).
+2. **External Supplier Audit Egress (`ServiceEntry` + TLS Origination)**:
+   - Under `REGISTRY_ONLY`, `inventory-service` needs to call an external supplier audit endpoint (`postman-echo.com`) using plaintext `http://postman-echo.com/get?merchant=novapay` on port `80`, while Envoy transparently originates HTTPS (`TLS SIMPLE`) to `postman-echo.com:443`.
    - Scope both the `ServiceEntry` and `DestinationRule` with `exportTo: ["."]` inside `orderflow` so other namespaces cannot use this external exception.
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **`HTTPRoute` `OR` Match Logic**: In Kubernetes Gateway API `HTTPRoute`, each item in `rules[].matches[]` is combined with boolean **`OR`** logic! Put `- path: { type: PathPrefix, value: /api/v2/orders }` as the first list item and `- headers: [{ name: x-canary-edge, value: v2 }]` as the second list item under `matches:`.
+> 2. **Header Modification Filter**: Use `filters: [{ type: RequestHeaderModifier, requestHeaderModifier: { set: [{ name: x-user-tier, value: vip }] } }]` on that rule.
+> 3. **Port 80 -> 443 TLS Origination Trick**: In `ServiceEntry/external-supplier-audit-se`, define port `80` (`protocol: HTTP`, `targetPort: 443`) alongside port `443` (`protocol: TLS`, `resolution: DNS`). Then in `DestinationRule`, configure `portLevelSettings` for `port.number: 80` with `tls: { mode: SIMPLE, sni: postman-echo.com }`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -255,13 +279,13 @@ spec:
             type: PathPrefix
             value: /api/v1/orders
       backendRefs:
-        - name: api-gateway
-          port: 8080
+        - name: frontend
+          port: 80
 ---
 apiVersion: networking.istio.io/v1
 kind: ServiceEntry
 metadata:
-  name: external-fraud-bureau-se
+  name: external-supplier-audit-se
   namespace: orderflow
 spec:
   hosts:
@@ -282,7 +306,7 @@ spec:
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: external-fraud-bureau-dr
+  name: external-supplier-audit-dr
   namespace: orderflow
 spec:
   host: postman-echo.com
@@ -311,13 +335,13 @@ PF_PID=$!
 sleep 2
 
 curl -s --cacert /tmp/novapay-edge.crt --resolve api.novapay.internal:8443:127.0.0.1 \
-  -H "x-canary-edge: v2" https://api.novapay.internal:8443/api/v1/orders | jq '{service: .env.SERVICE_NAME, version: .env.SERVICE_VERSION, tierHeader: .headers["x-user-tier"]}'
+  -H "x-canary-edge: v2" https://api.novapay.internal:8443/api/v1/orders | jq '{name: .name, body: .body}'
 
 kill $PF_PID
 
-# 3. Verify external TLS origination from fraud-service (calling http:// on port 80, receiving x-forwarded-proto: https!)
-FRAUD_POD=$(kubectl get pod -n orderflow -l app=fraud-service -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$FRAUD_POD" -c istio-proxy -- \
+# 3. Verify external TLS origination from inventory-service (calling http:// on port 80, receiving x-forwarded-proto: https!)
+INVENTORY_POD=$(kubectl get pod -n orderflow -l app=inventory-service -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$INVENTORY_POD" -c istio-proxy -- \
   curl -s http://postman-echo.com/get?merchant=novapay | jq '{url: .url, proto: .headers["x-forwarded-proto"]}'
 ```
 
@@ -382,6 +406,15 @@ EOF
    istioctl proxy-config secret "$INGRESS_POD.istio-system"
    ```
    Why can't `istio-ingressgateway` load `kubernetes://partner-webhook-tls` even though the `Gateway` CR and the `Secret` are both in the `orderflow` namespace?
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. In classic Istio (`networking.istio.io/v1` `Gateway`), `selector: { istio: ingressgateway }` binds the `Gateway` configuration to the **`istio-ingressgateway` pod**, which runs in the **`istio-system` namespace**.
+> 2. For security isolation, `istiod` only allows an Envoy gateway pod to load `credentialName` Secrets from the **same namespace where the gateway pod itself runs** (`istio-system`), **not** the namespace where the `Gateway` YAML object was applied (`orderflow`)!
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>

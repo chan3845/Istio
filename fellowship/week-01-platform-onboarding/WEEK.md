@@ -1,8 +1,17 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · **Week 01 of 10** · [Next Week ->](../week-02-dataplane-internals-and-ambient/WEEK.md)
+
 # Week 01 — Platform Onboarding & Control Plane Provisioning
 
 > **Phase 1: Foundations & Data Plane Internals** | **Cohort 01**
 > **Authoritative Baseline**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `1.36` / `1.37` | Gateway API `v1.6.1`
 > **Core Module Mapping**: [Module 00 — Environment Setup (`README.md`)](../../00-environment-setup/README.md) & [Guided Lab (`LAB.md`)](../../00-environment-setup/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 1 — Foundations & Data Plane Internals (Week 01 of 10)
+> - **Prerequisites**: Docker (`27.x+`), `kind` (`v0.27+`), `kubectl` (`1.36+`), `istioctl` (`1.32.0`), `helm` (`3.17+`), `jq`, and `openssl` installed locally
+> - **Estimated Time**: ~6–8 hours (Monday Briefing through Sunday Assessment)
+> - **Tangible Weekly Deliverable**: Running 4-node multi-zone `istio-course` cluster with Istio `1.32.0`, Gateway API `v1.6.1`, enrolled `orderflow` baseline workloads (`2/2 READY`), and onboarded `currency-service-v1` (`NP-101`)
 
 ---
 
@@ -50,7 +59,7 @@ By the end of Week 01, you will be able to:
 > +100 to banning `profile=demo`. At 100% trace sampling and verbose stdout logging, our node disk I/O spiked by 40% during last quarter's load test. In `NP-101`, make sure we document the exact delta between `default`, `minimal`, and `ambient` profiles in `1.32.0`. We need deliberate telemetry sampling (`1%` in prod, `100%` only in isolated debug sandboxes) and predictable resource footprints.
 
 > **Maya Patel (Principal Security Engineer)** `09:23 AM`
-> Also, as we bring up the `orderflow` baseline pods (`api-gateway`, `order-service`, `payment-service`), I do NOT want them all sharing the `default` Kubernetes `ServiceAccount`. Under PCI-DSS Requirement 7 & 8, every microservice must have a distinct cryptographic identity. In Istio, a pod's X.509 SAN is derived directly from its `ServiceAccount` (`spiffe://cluster.local/ns/orderflow/sa/<sa-name>`). If two services share `default`, I can't write an L7 `AuthorizationPolicy` in Week 5 to distinguish them.
+> Also, as we bring up the `orderflow` baseline pods (`frontend`, `order-service`, `payment-service`, `inventory-service`), I do NOT want them all sharing the `default` Kubernetes `ServiceAccount`. Under PCI-DSS Requirement 7 & 8, every microservice must have a distinct cryptographic identity. In Istio, a pod's X.509 SAN is derived directly from its `ServiceAccount` (`spiffe://cluster.local/ns/orderflow/sa/<sa-name>`). If two services share `default`, I can't write an L7 `AuthorizationPolicy` in Week 5 to distinguish them.
 
 > **Daniel Brooks (Staff Backend Engineer)** `09:26 AM`
 > Fair points. Just make sure whatever CNI settings you enforce don't break local development or silently bypass the sidecar. Look forward to seeing `NP-101` green.
@@ -71,9 +80,9 @@ By the end of Week 01, you will be able to:
 NovaPay requires a local multi-zone simulation cluster (`1 control-plane`, `3 worker nodes` across `us-east-1a`, `us-east-1b`, `us-east-1c`) running Istio `1.32.0` and Kubernetes Gateway API `v1.6.1`. This environment will serve as our staging proving ground for the `orderflow` payment processing pipeline prior to production rollout.
 
 #### Technical Requirements
-1. **Cluster & Gateway API Setup**: Provision the 4-node `kind` cluster (`istio-lab`) with topology zone labels and install Kubernetes Gateway API `v1.6.1` Standard CRDs (`GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, `ReferenceGrant`).
+1. **Cluster & Gateway API Setup**: Provision the 4-node `kind` cluster (`istio-course`) with topology zone labels and install Kubernetes Gateway API `v1.6.1` Standard CRDs (`GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, `ReferenceGrant`).
 2. **Control Plane Installation**: Install Istio `1.32.0` with Envoy access logging enabled in `JSON` format, outbound traffic policy set to `ALLOW_ANY` (to be locked down in Week 4), and explicit ingress/egress gateways.
-3. **Workload Enrollment**: Deploy the `orderflow` reference microservices (`api-gateway`, `order-service-v1`, `order-service-v2`, `payment-service-v1`, `payment-service-v2`, `fraud-service-v1`, `notification-service-v1`) with dedicated `ServiceAccount` identities and automatic sidecar injection (`2/2 READY`).
+3. **Workload Enrollment**: Deploy the `orderflow` reference microservices (`frontend-v1` with `frontend-sa`, `order-service-v1`/`v2` with `order-sa`, `payment-service-v1`/`v2` with `payment-sa`, `inventory-service-v1` with `inventory-sa`, and `client-toolbox` with `toolbox-sa`, plus `legacy-client` in `legacy-uninjected` with `legacy-sa`) and verify automatic sidecar injection (`2/2 READY` in `orderflow`, `1/1 READY` in `legacy-uninjected`).
 4. **Observability Addons**: Deploy Prometheus, Grafana, Jaeger, and Kiali into `istio-system` for golden-signal verification.
 
 #### Constraints
@@ -82,17 +91,23 @@ NovaPay requires a local multi-zone simulation cluster (`1 control-plane`, `3 wo
 - All workloads must run with dedicated `ServiceAccount` resources—zero workloads in `orderflow` may use the `default` `ServiceAccount`.
 
 #### Acceptance Criteria & Deliverables
-- [ ] All 4 Kubernetes nodes report `Ready` with distinct `topology.kubernetes.io/zone` labels (`us-east-1a`, `us-east-1b`, `us-east-1c`).
+- [ ] All 4 Kubernetes nodes in `istio-course` report `Ready` with distinct `topology.kubernetes.io/zone` labels (`us-east-1a`, `us-east-1b`, `us-east-1c`).
 - [ ] `istioctl version` reports Client `1.32.0`, Control Plane `1.32.0`, and Data Plane `1.32.0` across all proxies.
 - [ ] `istioctl proxy-status` shows `SYNCED (100%)` for CDS, LDS, EDS, and RDS across all `orderflow` pods and gateways.
-- [ ] End-to-end transaction probe from `load-generator` to `http://api-gateway.orderflow.svc.cluster.local:8080/api/v1/orders` returns `HTTP 200 OK` with verified JSON access logs in Envoy.
+- [ ] End-to-end transaction probe from `client-toolbox` to `http://frontend.orderflow.svc.cluster.local:80/` returns `HTTP 200 OK` with verified JSON access logs in Envoy.
 
 ---
 
 ## Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### Assigned Core Reading
-Read the complete architectural reference in [**Module 00 — Environment Setup & Lab Topology (`README.md`)**](../../00-environment-setup/README.md).
+### Assigned Core Reading & Modular Lessons
+Read the complete architectural reference and manifest breakdowns in Module 00:
+- **Core Module Reference**: [**Module 00 — Environment Setup & Lab Topology (`README.md`)**](../../00-environment-setup/README.md)
+- **Reference Cluster & Baseline Manifests**:
+  - [Multi-Zone Kind Cluster Topology (`kind-cluster.yaml`)](../../00-environment-setup/manifests/kind-cluster.yaml)
+  - [Production vs. Demo Profile Comparison (`istio-operator-demo-vs-prod.yaml`)](../../00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml)
+  - [Production GitOps Helm Values (`helm-values-prod.yaml`)](../../00-environment-setup/manifests/helm-values-prod.yaml)
+  - [OrderFlow Reference Workloads (`base-platform.yaml`)](../../00-environment-setup/manifests/base-platform.yaml)
 
 ### Alex's Guided Study Notes: What to Pay Attention to Under the Hood
 While reading Module 00, focus closely on these three production engineering realities:
@@ -134,10 +149,10 @@ Expected baseline:
 
 ### Step 2: Execute the Core Module Guided Lab
 Complete all steps in [**Module 00 — Hands-On Lab (`LAB.md`)**](../../00-environment-setup/LAB.md) to:
-1. Create the 4-node multi-zone `istio-lab` cluster.
+1. Create the 4-node multi-zone `istio-course` cluster.
 2. Install Gateway API `v1.6.1` Standard CRDs.
 3. Install Istio `1.32.0` (`istiod`, `istio-ingressgateway`, `istio-egressgateway`) and observability addons.
-4. Deploy the `orderflow` baseline workloads and verify East-West connectivity.
+4. Deploy the `orderflow` baseline workloads (`frontend`, `order-service`, `payment-service`, `inventory-service`, `client-toolbox`) and `legacy-client` in `legacy-uninjected`, and verify East-West connectivity.
 
 ### Step 3: Alex's Internal Verification Checkpoints
 Do not move to Thursday's independent assignment until every single checkpoint below passes on your cluster:
@@ -158,7 +173,7 @@ ORDER_POD=$(kubectl get pod -n orderflow -l app=order-service,version=v1 -o json
 istioctl proxy-config secret "$ORDER_POD.orderflow" -o json | jq -r '.dynamicActiveSecrets[] | select(.name=="default") | .secret.tlsCertificate.certificateChain.inlineBytes' | base64 -d | openssl x509 -noout -text | grep -A 1 "Subject Alternative Name"
 ```
 
-You must see `URI:spiffe://cluster.local/ns/orderflow/sa/order-service-sa` in the X.509 Subject Alternative Name output.
+You must see `URI:spiffe://cluster.local/ns/orderflow/sa/order-sa` in the X.509 Subject Alternative Name output.
 
 ---
 
@@ -186,6 +201,16 @@ Your task is to onboard `currency-service-v1` into the `orderflow` namespace fol
    - `istioctl analyze -n orderflow` reports **zero** validation warnings or errors.
    - `istioctl proxy-config listener` confirms Envoy generated an `http_connection_manager` filter for port `8080` (not raw TCP passthrough).
    - The workload's SPIFFE URI is `spiffe://cluster.local/ns/orderflow/sa/currency-service-sa`.
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Dual Protocol Port Specification**: In your `Service` YAML (`spec.ports[]`), always include **both** the Istio port name prefix (`name: http-fx`, `name: grpc-settlement`) **and** the Kubernetes `appProtocol` field (`appProtocol: http`, `appProtocol: grpc`). That ensures both `istioctl analyze` (`IST0118`) and Kubernetes-native tooling classify the L7 protocol without falling back to protocol sniffing.
+> 2. **Proxy Resource Annotations**: Place `sidecar.istio.io/proxyCPU: "50m"` and `sidecar.istio.io/proxyMemory: "128Mi"` under `spec.template.metadata.annotations` (on the Pod template), **not** on `metadata.annotations` of the `Deployment` object!
+> 3. **SPIFFE Identity Binding**: Remember to set `spec.template.spec.serviceAccountName: currency-service-sa` so `pilot-agent` requests an X.509 certificate for `currency-service-sa` instead of `default`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -286,15 +311,15 @@ istioctl analyze -n orderflow
 CURRENCY_POD=$(kubectl get pod -n orderflow -l app=currency-service,version=v1 -o jsonpath='{.items[0].metadata.name}')
 istioctl proxy-config listener "$CURRENCY_POD.orderflow" --port 8080
 
-# 4. Verify SPIFFE identity from load-generator
-LOADGEN_POD=$(kubectl get pod -n orderflow -l app=load-generator -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -s http://currency-service.orderflow.svc.cluster.local:8080/fx | jq -r '.headers["x-forwarded-client-cert"]'
+# 4. Verify SPIFFE identity from client-toolbox
+TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n orderflow "$TOOLBOX_POD" -c toolbox -- curl -s http://currency-service.orderflow.svc.cluster.local:8080/fx | jq -r '.headers["x-forwarded-client-cert"]'
 ```
 
 ### Alex's Code Review
 > *"Clean work. Notice two details in your solution that separate senior platform engineers from beginners:*
 > 1. *You defined **both** `name: http-fx` and `appProtocol: http` on the `Service`. While Kubernetes 1.20+ standardized `appProtocol`, many third-party observability tools and older Envoy filter generators still inspect the `name` prefix (`http-*`, `grpc-*`). Providing both guarantees zero ambiguity.*
-> 2. *Checking `x-forwarded-client-cert` (`XFCC`) in the echo output proved that mutual TLS happened transparently over the wire and that `currency-service` verified the caller's SPIFFE identity (`spiffe://cluster.local/ns/orderflow/sa/load-generator-sa`) without a single line of TLS code in the application."*
+> 2. *Checking `x-forwarded-client-cert` (`XFCC`) in the echo output proved that mutual TLS happened transparently over the wire and that `currency-service` verified the caller's SPIFFE identity (`spiffe://cluster.local/ns/orderflow/sa/toolbox-sa`) without a single line of TLS code in the application."*
 
 </details>
 
@@ -306,9 +331,9 @@ kubectl exec -n orderflow "$LOADGEN_POD" -c load-generator -- curl -s http://cur
 
 > **CRITICAL ALERT — `#inc-01-recon-onboarding`**
 > **Incident Commander**: Sarah Chen (SRE Lead)
-> **Symptom**: A product team just deployed a new `settlement-recon` service in a dedicated `orderflow-recon` namespace and also updated the `fraud-service` `Service` definition in `orderflow`. Two issues are firing simultaneously:
+> **Symptom**: A product team just deployed a new `settlement-recon` service in a dedicated `orderflow-recon` namespace and also updated the `inventory-service` `Service` definition in `orderflow`. Two issues are firing simultaneously:
 > 1. Every pod in `orderflow-recon` is starting `1/1 Running` with **no Envoy sidecar**, failing Maya's compliance scanner.
-> 2. Calls from `order-service` to `fraud-service` in `orderflow` are experiencing erratic protocol detection delays, and `istioctl analyze` is throwing warnings on `fraud-service`.
+> 2. Calls from `order-service` to `inventory-service` in `orderflow` are experiencing erratic protocol detection delays, and `istioctl analyze` is throwing warnings on `inventory-service`.
 
 ### Step 1: Inject the Broken State
 Run the following script to reproduce the exact state left behind by the product team's failed deployment:
@@ -371,18 +396,18 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: fraud-service
+  name: inventory-service
   namespace: orderflow
   labels:
-    app: fraud-service
-    service: fraud-service
+    app: inventory-service
+    service: inventory-service
 spec:
   ports:
     - port: 8080
       targetPort: 8080
-      name: custom-fraud-port
+      name: custom-inventory-port
   selector:
-    app: fraud-service
+    app: inventory-service
 EOF
 ```
 
@@ -390,7 +415,17 @@ EOF
 Use your diagnostic toolkit (`kubectl`, `istioctl analyze`, `istioctl check-inject`) to investigate before opening the RCA:
 1. Run `istioctl analyze --all-namespaces`. Which exact analyzer codes (`IST01XX`) fire on `orderflow-recon` and `orderflow`?
 2. Run `istioctl experimental check-inject -n orderflow-recon $(kubectl get pod -n orderflow-recon -l app=settlement-recon -o jsonpath='{.items[0].metadata.name}')`. Why did the `istio-sidecar-injector` webhook skip the pod?
-3. Inspect the `fraud-service` outbound listener on `order-service-v1` using `istioctl proxy-config listener <order-pod>.orderflow --port 8080`. How did changing `name: http` to `name: custom-fraud-port` change the Envoy listener configuration?
+3. Inspect the `inventory-service` outbound listener on `order-service-v1` using `istioctl proxy-config listener <order-pod>.orderflow --port 8080`. How did changing `name: http-api` to `name: custom-inventory-port` change the Envoy listener configuration?
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. Check the exact value of the `istio-injection` label on `Namespace/orderflow-recon` (`kubectl get ns orderflow-recon --show-labels`). Compare it against the `namespaceSelector` inside `kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml`. What value does the webhook actually match—`"true"` or `"enabled"`?
+> 2. Remember that Kubernetes Mutating Admission Webhooks only run when a `Pod` is **created**. After fixing the namespace label, what must you do to `deployment/settlement-recon-v1` so the webhook fires?
+> 3. Look at `Service/inventory-service` in `orderflow` and `Service/settlement-recon` in `orderflow-recon`. Neither `custom-inventory-port` nor `web-port` starts with a recognized Istio protocol prefix (`http-*`, `grpc-*`, `tcp-*`), and neither sets `appProtocol: http`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>
@@ -399,12 +434,12 @@ Use your diagnostic toolkit (`kubectl`, `istioctl analyze`, `istioctl check-inje
 1. **Why did `settlement-recon-v1` start with `1/1` containers (no `istio-proxy`)?**
    Because the `istio-sidecar-injector` mutating webhook did not match the `orderflow-recon` namespace.
 2. **Why did the mutating webhook ignore the `orderflow-recon` namespace?**
-   Because the namespace was labeled `istio-injection: "true"` instead of `istio-injection: enabled`. The webhook's `namespaceSelector` explicitly requires `istio-injection: enabled`.
+   Because the namespace was labeled `istio-injection: "true"` instead of `istio-injection: enabled`. The webhook's `namespaceSelector` explicitly requires `istio-injection: enabled` (`IST0135` / `IST0116`).
 3. **Why does labeling the namespace `istio-injection: enabled` not immediately fix the running pod?**
    Because Kubernetes mutating admission webhooks only execute during `CREATE` events for `Pod` objects. Existing pods must be recreated (`kubectl rollout restart`) after fixing the namespace label.
-4. **Why did `fraud-service` lose explicit L7 HTTP routing and trigger `IST0118` warnings?**
-   Because the engineer renamed the `Service` port from `http` to `custom-fraud-port` and omitted `appProtocol: http`.
-5. **Why does `custom-fraud-port` degrade data plane behavior?**
+4. **Why did `inventory-service` lose explicit L7 HTTP routing and trigger `IST0118` warnings?**
+   Because the engineer renamed the `Service` port from `http-api` to `custom-inventory-port` and omitted `appProtocol: http`.
+5. **Why does `custom-inventory-port` degrade data plane behavior?**
    Without a recognized prefix (`http-*`, `grpc-*`, `tcp-*`) or `appProtocol`, `istiod` cannot statically build an L7 `http_connection_manager` listener and must fall back to dynamic protocol sniffing, risking 5-second protocol detection delays on server-first protocols and breaking explicit L7 policy predictability.
 
 ### Remediation Commands
@@ -413,12 +448,12 @@ Use your diagnostic toolkit (`kubectl`, `istioctl analyze`, `istioctl check-inje
 # 1. Fix the namespace label on orderflow-recon
 kubectl label namespace orderflow-recon istio-injection=enabled --overwrite
 
-# 2. Fix the port naming on settlement-recon and fraud-service
+# 2. Fix the port naming on settlement-recon and inventory-service
 kubectl patch service settlement-recon -n orderflow-recon --type='json' \
   -p='[{"op": "replace", "path": "/spec/ports/0/name", "value": "http-recon"}, {"op": "add", "path": "/spec/ports/0/appProtocol", "value": "http"}]'
 
-kubectl patch service fraud-service -n orderflow --type='json' \
-  -p='[{"op": "replace", "path": "/spec/ports/0/name", "value": "http"}, {"op": "add", "path": "/spec/ports/0/appProtocol", "value": "http"}]'
+kubectl patch service inventory-service -n orderflow --type='json' \
+  -p='[{"op": "replace", "path": "/spec/ports/0/name", "value": "http-api"}, {"op": "add", "path": "/spec/ports/0/appProtocol", "value": "http"}]'
 
 # 3. Trigger a rolling restart of settlement-recon-v1 so the MutatingWebhook injects istio-proxy
 kubectl rollout restart deployment/settlement-recon-v1 -n orderflow-recon
@@ -443,9 +478,9 @@ kubectl delete -f currency-service.yaml --ignore-not-found
 Prepare concise, technically rigorous answers to these four questions from the NovaPay architecture review board:
 
 1. **Alex Morgan (Platform)**: *"During an Istio control plane upgrade from `1.31` to `1.32.0`, why would we use `istio.io/rev=1-32-0` revision labels on namespaces instead of `istio-injection=enabled`? What happens to running pods in `orderflow` the moment we flip the revision label?"*
-2. **Sarah Chen (SRE)**: *"Suppose `istiod` in `istio-system` crashes completely or scales to zero replicas during a Friday peak traffic spike. What happens to existing checkout requests flowing through `api-gateway` -> `order-service` -> `payment-service`? What breaks, and what continues working?"*
+2. **Sarah Chen (SRE)**: *"Suppose `istiod` in `istio-system` crashes completely or scales to zero replicas during a Friday peak traffic spike. What happens to existing checkout requests flowing through `frontend` -> `order-service` -> `payment-service`? What breaks, and what continues working?"*
 3. **Daniel Brooks (Backend)**: *"In our CI/CD pipeline, how can we fail a pull request BEFORE it gets merged if a developer forgets to name a `Service` port `http-*` or writes `istio-injection: true`?"*
-4. **Maya Patel (Security)**: *"Where is the private key for `spiffe://cluster.local/ns/orderflow/sa/payment-service-sa` stored? If an attacker gains read access to etcd on the Kubernetes control plane, can they extract that workload's mTLS private key?"*
+4. **Maya Patel (Security)**: *"Where is the private key for `spiffe://cluster.local/ns/orderflow/sa/payment-sa` stored? If an attacker gains read access to etcd on the Kubernetes control plane, can they extract that workload's mTLS private key?"*
 
 ### Alex's Office Hours Q&A (Deep-Dive Edge Cases)
 
@@ -481,7 +516,7 @@ Test your mastery of Week 01 concepts before checking the answer key.
    - *(b)* What specific Cilium Helm value fixes this for Sidecar Mode?
 
 3. **xDS Synchronization Diagnostics**:
-   When running `istioctl proxy-status`, you see `CDS: SYNCED`, `LDS: SYNCED`, `EDS: STALE (Never Acknowledged)` for `api-gateway-xxx.orderflow`.
+   When running `istioctl proxy-status`, you see `CDS: SYNCED`, `LDS: SYNCED`, `EDS: STALE (Never Acknowledged)` for `frontend-v1-xxx.orderflow`.
    - *(a)* What does `EDS` stand for, and what Kubernetes resource changes trigger an `EDS` push?
    - *(b)* What does `STALE` indicate in the gRPC ADS protocol between `istiod` and `istio-proxy`?
 
@@ -518,7 +553,7 @@ Test your mastery of Week 01 concepts before checking the answer key.
 
 ### Weekly Competency Sign-Off Checklist
 Before moving to **Week 02 (Data Plane Internals, Envoy xDS & Ambient Mesh)**, verify you have completed:
-- [ ] Built the 4-node multi-zone `istio-lab` cluster with Gateway API `v1.6.1` CRDs.
+- [ ] Built the 4-node multi-zone `istio-course` cluster with Gateway API `v1.6.1` CRDs.
 - [ ] Installed Istio `1.32.0` and verified `SYNCED` state across all `orderflow` workloads.
 - [ ] Completed Thursday's `currency-service-v1` onboarding challenge and verified SPIFFE identities via `istioctl proxy-config secret`.
 - [ ] Resolved Friday's `INC-01` simulation and eliminated all `istioctl analyze` warnings.

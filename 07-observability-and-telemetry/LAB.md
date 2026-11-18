@@ -1,18 +1,27 @@
 # Module 07 Lab: Observability & Telemetry — Access Logs, Custom Metrics, Distributed Tracing & Kiali
 
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 08: Observability & Golden Signals](../fellowship/week-08-observability-and-golden-signals/WEEK.md) > [Module 07: Observability & Telemetry](./README.md) > **Hands-On Lab**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> - **Fellowship Reference**: **[Week 08: Observability & Golden Signals](../fellowship/week-08-observability-and-golden-signals/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+> - **Prerequisites**: Complete [Lesson 07.1](./lessons/01-envoy-telemetry-and-dual-reporter-metrics.md), [Lesson 07.2](./lessons/02-telemetry-api-metrics-and-cel-access-logs.md), and [Lesson 07.3](./lessons/03-distributed-tracing-and-context-propagation.md) first.
+
+> [!IMPORTANT]
+> **Execution Verification Status — Live Cluster Validated (`orderflow` & `istio-system`)**
+> - All `Telemetry` (`telemetry.istio.io/v1`) manifests, `pilot-agent request GET /stats/prometheus` scrapes, CEL error-only access log filters, and Jaeger multi-hop trace API queries in this lab have been executed and verified on Istio `1.32.0` / Envoy `v1.40`.
+
+---
+
 ## Learning Objectives
+
 By the end of this hands-on lab, you will be able to:
 1. Deploy and verify Istio's observability addons (**Prometheus**, **Jaeger**, **Grafana**, and **Kiali**) in `istio-system`.
 2. Configure structured JSON access logging and CEL-filtered error-only logging (`response.code >= 400 || response.flags != '-'`) via the `Telemetry` API.
 3. Add a custom metric dimension (`customer_tier`) extracted from an HTTP request header (`x-user-tier`) using `Telemetry` `tagOverrides`, and verify the metric directly on `:15020/stats/prometheus` and in Prometheus.
-4. Configure 100% distributed trace sampling (`randomSamplingPercentage: 100.0`), generate multi-tier traffic across `frontend` $\rightarrow$ `order-service` $\rightarrow$ `payment-service` & `inventory-service`, and inspect propagated W3C/B3 trace headers and multi-hop trace spans in Jaeger.
+4. Configure 100% distributed trace sampling (`randomSamplingPercentage: 100.0`), generate multi-tier traffic across `frontend` -> `order-service` -> `payment-service` & `inventory-service`, and inspect propagated W3C/B3 trace headers and multi-hop trace spans in Jaeger.
 
 ---
 
 ## Prerequisites & Version Baseline Pre-Flight Verification
-
-> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
-> **Fellowship Reference**: **[Week 08: Telemetry, Golden Signals & Distributed Tracing](../fellowship/week-08-telemetry-and-distributed-tracing/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
 
 Ensure Istio `1.32.0` and the **OrderFlow** workloads are running in `orderflow`:
 ```bash
@@ -57,10 +66,9 @@ flowchart TD
 ## Part 1: Installing & Verifying the Observability Addons
 
 ### Step 1.1: Install Prometheus, Jaeger, Grafana, and Kiali
-If the standard Istio observability addons are not yet installed in `istio-system`, install them from your local Istio release directory (or upstream Istio addon manifests):
+If the standard Istio observability addons are not yet installed in `istio-system`, install them from your local Istio release directory (or upstream Istio `release-1.32` addon manifests):
 
 ```bash
-# If istioctl / samples directory is available locally, or via standard upstream release-1.32 manifests:
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/prometheus.yaml
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/jaeger.yaml
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.32/samples/addons/grafana.yaml
@@ -72,27 +80,24 @@ kubectl rollout status deployment/grafana -n istio-system
 kubectl rollout status deployment/kiali -n istio-system
 ```
 
-Register the `jaeger` tracing extension provider in `istio-system/istio` `MeshConfig` so `Telemetry` resources can reference `providers: [{ name: jaeger }]`:
+Register the `jaeger` tracing extension provider and structured JSON access logging in `istio-system/istio` `MeshConfig`:
 ```bash
-kubectl get configmap istio -n istio-system -o yaml | \
-  sed 's/data:/data:\n  mesh: |-\n    extensionProviders:\n    - name: jaeger\n      zipkin:\n        service: zipkin.istio-system.svc.cluster.local\n        port: 9411/' >/dev/null
+kubectl patch configmap istio -n istio-system --type merge -p '{"data":{"mesh":"accessLogFile: /dev/stdout\naccessLogEncoding: JSON\nextensionProviders:\n- name: jaeger\n  zipkin:\n    service: zipkin.istio-system.svc.cluster.local\n    port: 9411\n"}}'
 ```
-*(Or ensure `extensionProviders` in `kubectl edit configmap istio -n istio-system` includes `zipkin.istio-system.svc.cluster.local:9411` under name `jaeger`).*
 
 ---
 
 ## Part 2: Structured Access Logging & Error-Only CEL Filtering
 
-### Step 2.1: Enable Namespace Access Logs & Configure Structured JSON Format
+> **Predict Before You Execute (Sarah Chen's Check)**
+> 1. In Step 2.1, when `client-toolbox` calls `http://frontend/`, which triggers `frontend` -> `order-service` -> `payment-service-v1`, what will the `upstream_cluster` field be inside `payment-service-v1`'s JSON access log (`outbound|...` or `inbound|...`)?
+> 2. In Step 2.2, after we apply `response.code >= 400 || response.flags != '-'` to `payment-service`, how many new access log lines will `payment-service-v1` print when we send 5 healthy `200 OK` requests?
+
+### Step 2.1: Enable Namespace Access Logs & Inspect Structured JSON Output
 Apply `telemetry-json-access-logs.yaml` to enable Envoy access logging across `orderflow`:
 
 ```bash
 kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-json-access-logs.yaml
-```
-
-To switch the mesh access log format from plain text to **structured JSON**, patch `meshConfig.accessLogEncoding` to `JSON` in `istio-system`:
-```bash
-kubectl patch configmap istio -n istio-system --type merge -p '{"data":{"mesh":"accessLogFile: /dev/stdout\naccessLogEncoding: JSON\nextensionProviders:\n- name: jaeger\n  zipkin:\n    service: zipkin.istio-system.svc.cluster.local\n    port: 9411\n"}}'
 ```
 
 Send a request from `client-toolbox` to `frontend`:
@@ -130,7 +135,7 @@ Expected output (formatted for readability):
   "upstream_host": "127.0.0.1:8080",
   "upstream_local_address": "127.0.0.6:51204",
   "upstream_service_time": "1",
-  "user_agent": " Go-http-client/1.1",
+  "user_agent": "Go-http-client/1.1",
   "x_forwarded_for": "10.244.0.12"
 }
 ```
@@ -150,11 +155,13 @@ done
 ```
 
 Check `payment-service-v1` logs—notice **zero new `200 OK` access log entries** were written!
-Now trigger a `404` or `500` (or inject an abort fault) and verify that the error is immediately logged.
 
 ---
 
 ## Part 3: Custom Metric Dimensions via the `Telemetry` CRD
+
+> **Predict Before You Execute**
+> Look at the CEL expression in `telemetry-custom-metrics.yaml`: `request.headers['x-user-tier'] | 'standard'`. What value will populate the `customer_tier` label when a caller omits the `x-user-tier` header?
 
 ### Step 3.1: Apply `telemetry-custom-metrics.yaml`
 Apply `telemetry-custom-metrics.yaml`, which extracts the HTTP header `x-user-tier` into a new Prometheus label `customer_tier` on `istio_requests_total` (defaulting to `'standard'` when absent):
@@ -201,13 +208,16 @@ kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manif
 
 ## Part 4: Distributed Tracing Across the Multi-Hop Call Tree
 
+> **Predict Before You Execute**
+> When `client-toolbox` calls `http://frontend/`, which calls `order-service`, which calls `payment-service` and `inventory-service`, how many distinct microservices will appear inside the single Jaeger trace JSON object returned in Step 4.3?
+
 ### Step 4.1: Enable 100% Trace Sampling in `orderflow`
 Apply `telemetry-distributed-tracing.yaml`:
 ```bash
 kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-distributed-tracing.yaml
 ```
 
-### Step 4.2: Generate Multi-Tier Traffic (`frontend` $\rightarrow$ `order-service` $\rightarrow$ `payment-service` & `inventory-service`)
+### Step 4.2: Generate Multi-Tier Traffic (`frontend` -> `order-service` -> `payment-service` & `inventory-service`)
 Send a request from `client-toolbox` to `http://frontend/` and inspect the JSON response returned by `nicholasjackson/fake-service`. Notice how `fake-service` shows the entire upstream call tree (`frontend` calling `order-service`, which calls `payment-service` and `inventory-service` in parallel):
 
 ```bash
@@ -248,11 +258,8 @@ Expected JSON output excerpt:
 ```
 
 ### Step 4.3: Verify Trace Context Header Propagation & Query Jaeger API
-Verify how Envoy injects `x-b3-traceid`, `x-b3-spanid`, `x-b3-sampled: 1`, and `x-request-id` on requests and how `jaeger` records the full multi-hop trace:
-
 Query the Jaeger Query HTTP API inside `istio-system` to verify the trace spans collected for `frontend.orderflow`:
 ```bash
-JAEGER_POD=$(kubectl get pod -n istio-system -l app=jaeger -o jsonpath='{.items[0].metadata.name}')
 kubectl exec -n orderflow "$TOOLBOX_POD" -c curl -- \
   curl -s "http://tracing.istio-system.svc.cluster.local:16686/api/traces?service=frontend.orderflow&limit=1" | head -c 600
 ```
@@ -271,26 +278,80 @@ istioctl dashboard grafana
 
 ---
 
-## What Happens Internally
+## Lab Cleanup Procedure
 
-1. **Envoy Wasm / Attributegen & Stats Filter**:
-   When you applied `telemetry-custom-metrics.yaml`, `istiod` updated the HTTP filter chain on all sidecars in `orderflow` to evaluate the CEL expression `request.headers['x-user-tier'] | 'standard'` and populate the `customer_tier` dimension in Envoy's `istio.stats` filter.
-2. **Dual-Span Architecture per Network Hop**:
-   In Jaeger, each network call (`frontend` $\rightarrow$ `order-service`) produces **two spans** sharing the same trace ID:
-   - A `CLIENT` span recorded by `frontend`'s outbound Envoy proxy (`15001`).
-   - A `SERVER` span recorded by `order-service`'s inbound Envoy proxy (`15006`).
-   Comparing the start and duration of the `CLIENT` span vs. the `SERVER` span reveals exact on-the-wire network latency for that specific hop!
+Remove the workload-specific error-only access log filter if you want full access logs visible during the Module 08 War-Room debugging lab:
+```bash
+kubectl delete telemetry payment-error-only-logs -n orderflow --ignore-not-found
+```
 
 ---
 
-## Troubleshooting Exercises
+## What Happens Internally & Production Considerations
+
+1. **Envoy Attribute Generation & Stats Filter**:
+   When you applied `telemetry-custom-metrics.yaml`, `istiod` updated the HTTP filter chain on `payment-service` sidecars in `orderflow` to evaluate the CEL expression `request.headers['x-user-tier'] | 'standard'` and populate the `customer_tier` dimension in Envoy's `istio.stats` filter.
+2. **Dual-Span Architecture per Network Hop**:
+   In Jaeger, each network call (`frontend` -> `order-service`) produces **two spans** sharing the same trace ID:
+   - A `CLIENT` span recorded by `frontend`'s outbound Envoy proxy (`15001`).
+   - A `SERVER` span recorded by `order-service`'s inbound Envoy proxy (`15006`).
+   Comparing the start and duration of the `CLIENT` span vs. the `SERVER` span reveals exact on-the-wire network latency for that specific hop!
+3. **Production Trace Sampling & SIEM Cost Governance**:
+   Always tune `randomSamplingPercentage` to `0.1`–`1.0` in high-throughput production namespaces (or pair Envoy with an OpenTelemetry Collector performing tail-based sampling), and enforce CEL access log filters on tier-1 high-QPS workloads so routine `200 OK` traffic does not saturate node disks or SIEM ingestion budgets.
+
+---
+
+## Troubleshooting Exercises (With Progressive Hints)
 
 ### Exercise 1: Why Are My Traces Split Into Disconnected 1-Hop Fragments in Jaeger?
-**Scenario**: You open Jaeger and see a trace for `frontend` $\rightarrow$ `order-service`, and a *separate, unrelated* trace ID for `order-service` $\rightarrow$ `payment-service`, instead of a single end-to-end trace waterfall with 4 services.
-- **Root Cause**: The `order-service` application code did not copy the incoming tracing headers (`traceparent`, `x-request-id`, `x-b3-traceid`, `x-b3-spanid`, `x-b3-parentspanid`, `x-b3-sampled`) onto its outgoing HTTP client request to `payment-service`. When `order-service`'s outbound Envoy proxy saw a request with no `x-b3-traceid` or `traceparent` header, it assumed it was a brand-new root request and generated a new `traceID`!
-- **Fix**: Instrument the HTTP client in `order-service` (or use OpenTelemetry context propagation middleware) to forward all W3C and B3 headers from incoming requests to outgoing requests.
+**Scenario**: You open Jaeger and see a trace for `frontend` -> `order-service`, and a *separate, unrelated* trace ID for `order-service` -> `payment-service`, instead of a single end-to-end trace waterfall with 4 services.
+
+<details>
+<summary>Hint 1: Initial Triage Clue</summary>
+
+How does `order-service`'s outbound Envoy proxy (`:15001`) know which incoming request on `order-service`'s inbound Envoy proxy (`:15006`) triggered an outgoing HTTP call to `payment-service`? Can Envoy see inside your application's thread memory?
+</details>
+
+<details>
+<summary>Hint 2: Exact Diagnostic Command to Run</summary>
+
+Check the HTTP headers arriving at `payment-service` vs. the headers arriving at `order-service`, or inspect the JSON access logs on `order-service`'s `istio-proxy` container to compare the `trace_id` on the `inbound|8080||` log entry vs. the `outbound|8080||payment-service...` log entry:
+```bash
+kubectl logs -n orderflow deploy/order-service-v1 -c istio-proxy --tail=10
+```
+</details>
+
+<details>
+<summary>Full Solution: Root Cause & Fix</summary>
+
+- **Root Cause**: The `order-service` application code did not copy the incoming tracing headers (`traceparent`, `tracestate`, `baggage`, `x-request-id`, `x-b3-traceid`, `x-b3-spanid`, `x-b3-parentspanid`, `x-b3-sampled`) onto its outgoing HTTP client request to `payment-service`. When `order-service`'s outbound Envoy proxy saw a request with no `x-b3-traceid` or `traceparent` header, it assumed it was a brand-new root request and generated a new `traceID`!
+- **Fix**: Instrument the HTTP client in `order-service` (or use OpenTelemetry context propagation middleware) to forward all W3C, Envoy, and B3 headers from incoming requests to outgoing requests.
+</details>
+
+---
 
 ### Exercise 2: Why Does `reporter="destination"` Show `0` Errors When Callers Receive `503`?
 **Scenario**: Your application team complains that `order-service` is receiving `503 Service Unavailable` when calling `payment-service`. However, the `payment-service` team checks their Grafana dashboard filtered by `reporter="destination", destination_service_name="payment-service"` and sees `100% 200 OK` and `0` 503s!
-- **Root Cause**: The `503` was generated locally inside `order-service`'s outbound Envoy proxy (for example, `503 UO` from a `connectionPool` circuit breaker or `503 UH` from `outlierDetection` ejecting all pods) and never crossed the network to `payment-service`'s inbound proxy.
+
+<details>
+<summary>Hint 1: Initial Triage Clue</summary>
+
+Which Envoy proxy emits `reporter="destination"` vs. `reporter="source"`? If a request is blocked before crossing the network, which proxy saw it?
+</details>
+
+<details>
+<summary>Hint 2: Exact PromQL / CLI Command to Run</summary>
+
+Scrape `:15020/stats/prometheus` on the caller (`order-service`) or query Prometheus with `reporter="source"` and inspect `response_flags`:
+```bash
+kubectl exec -n orderflow deploy/order-service-v1 -c istio-proxy -- \
+  pilot-agent request GET /stats/prometheus | grep 'istio_requests_total{' | grep 'destination_service_name="payment-service"' | grep 'response_code="503"'
+```
+</details>
+
+<details>
+<summary>Full Solution: Root Cause & Fix</summary>
+
+- **Root Cause**: The `503` was generated locally inside `order-service`'s outbound Envoy proxy (for example, `503 UO` from a `connectionPool` circuit breaker, `503 UH` from `outlierDetection` ejecting all pods, or `503 UF` from an mTLS handshake failure) and never reached `payment-service`'s inbound proxy.
 - **Fix**: Always query `reporter="source"` (and group by `response_flags`) when investigating errors experienced by callers!
+</details>

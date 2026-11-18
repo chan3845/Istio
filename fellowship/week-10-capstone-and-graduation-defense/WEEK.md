@@ -1,3 +1,5 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-09-incident-response-and-control-plane-ops/WEEK.md) · **Week 10 of 10 (Final Graduation Week)**
+
 # Week 10: NovaPay Production Cutover Capstone & Fellowship Graduation Defense
 
 **Phase 4: Observability, Operations & Capstone** | **Schedule**: Week 10 of 10 (Final Graduation Week)  
@@ -7,6 +9,13 @@
 - 📁 **Reference Production Manifests**: [Module 10 Manifests (`manifests/`)](../../10-capstone-project/manifests/)
 - 🤖 **Automated 6-Pillar Verification Suite**: [Capstone Grader (`verify-capstone.sh`)](../../10-capstone-project/verify-capstone.sh)
 - 📊 **Cohort Progression Tracker**: [Fellowship Progression Dashboard (`PROGRESSION_DASHBOARD.md`)](../../PROGRESSION_DASHBOARD.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 4 — Observability, Operations & Capstone (Week 10 of 10 — Final Graduation Week)
+> - **Prerequisites**: Completed Weeks 01–09 (Mastery across all 6 Service Mesh Pillars: Onboarding, Zero-Trust Security, Edge/Egress, Resilience, Progressive Delivery, and Observability/Operations)
+> - **Estimated Time**: ~8–10 hours
+> - **Tangible Weekly Deliverable**: Complete 6-pillar multi-namespace NovaPay production mesh (`novapay` + `novapay-pci`) passing `verify-capstone.sh` at `100%`, resolution of `INC-10`, and completion of the 8-Prompt Graduation Defense Board (`NP-110`)
 
 ---
 
@@ -68,9 +77,16 @@ To graduate from the **Istio Service Mesh Engineering Fellowship — Cohort 01**
 
 ## 📅 Tuesday — Capstone Architecture Deep-Dive & Cross-Pillar Interactions
 
-### 📚 Assigned Core Reading
-Review the complete Capstone specification before deploying any manifests:
-👉 **[Module 10: NovaPay Capstone Architecture Specification (`../../10-capstone-project/README.md`)](../../10-capstone-project/README.md)**
+### 📚 Assigned Core Reading & Capstone Pillar Blueprints
+Review the complete Capstone specification and the 6 reference pillar manifests before deploying:
+- 👉 **Capstone Architecture Specification**: **[Module 10: NovaPay Capstone Architecture Specification (`../../10-capstone-project/README.md`)](../../10-capstone-project/README.md)**
+- **6-Pillar Production Manifest Blueprints**:
+  1. [Pillar 1 — Namespaces & Sidecar Scoping (`01-namespaces-and-sidecars.yaml`)](../../10-capstone-project/manifests/01-namespaces-and-sidecars.yaml)
+  2. [Pillar 2 — Multi-Namespace Workloads (`02-workloads.yaml`)](../../10-capstone-project/manifests/02-workloads.yaml)
+  3. [Pillar 3 — Zero-Trust Security, mTLS & RBAC (`03-zero-trust-security.yaml`)](../../10-capstone-project/manifests/03-zero-trust-security.yaml)
+  4. [Pillar 4 — Ingress & Egress Gateways + TLS Origination (`04-ingress-egress-gateways.yaml`)](../../10-capstone-project/manifests/04-ingress-egress-gateways.yaml)
+  5. [Pillar 5 — Resilience, Circuit Breaking & Canary Routing (`05-resilience-and-routing.yaml`)](../../10-capstone-project/manifests/05-resilience-and-routing.yaml)
+  6. [Pillar 6 — Telemetry, CEL Access Logs & Tracing (`06-telemetry-and-observability.yaml`)](../../10-capstone-project/manifests/06-telemetry-and-observability.yaml)
 
 ### 📝 Alex Morgan's Cross-Pillar Integration Notes
 
@@ -136,11 +152,12 @@ istioctl proxy-status
 ### 🚀 Step-by-Step Capstone Deployment & Verification
 1. Inspect the reference architecture and requirements in **[`../../10-capstone-project/README.md`](../../10-capstone-project/README.md)**.
 2. Review or deploy the 6 pillar manifests in **[`../../10-capstone-project/manifests/`](../../10-capstone-project/manifests/)**:
-   - [`01-namespaces-and-workloads.yaml`](../../10-capstone-project/manifests/01-namespaces-and-workloads.yaml)
-   - [`02-security-zero-trust.yaml`](../../10-capstone-project/manifests/02-security-zero-trust.yaml)
-   - [`03-ingress-and-egress.yaml`](../../10-capstone-project/manifests/03-ingress-and-egress.yaml)
-   - [`04-resilience-and-traffic.yaml`](../../10-capstone-project/manifests/04-resilience-and-traffic.yaml)
-   - [`05-telemetry.yaml`](../../10-capstone-project/manifests/05-telemetry.yaml)
+   - [`01-namespaces-and-sidecars.yaml`](../../10-capstone-project/manifests/01-namespaces-and-sidecars.yaml)
+   - [`02-workloads.yaml`](../../10-capstone-project/manifests/02-workloads.yaml)
+   - [`03-zero-trust-security.yaml`](../../10-capstone-project/manifests/03-zero-trust-security.yaml)
+   - [`04-ingress-egress-gateways.yaml`](../../10-capstone-project/manifests/04-ingress-egress-gateways.yaml)
+   - [`05-resilience-and-routing.yaml`](../../10-capstone-project/manifests/05-resilience-and-routing.yaml)
+   - [`06-telemetry-and-observability.yaml`](../../10-capstone-project/manifests/06-telemetry-and-observability.yaml)
 3. Run the automated Capstone Verification Suite to validate all 6 pillars end-to-end:
    ```bash
    chmod +x ../../10-capstone-project/verify-capstone.sh
@@ -181,6 +198,16 @@ Before Friday's chaos drill, Maya and Alex want you to design an advanced extens
    - Ensure the `DestinationRule` for `httpbin.org` in `novapay-pci` not only originates `SIMPLE` TLS on port `443` with `sni: httpbin.org`, but also enforces a `connectionPool` (`maxConnections: 50`, `connectTimeout: 2s`) and `outlierDetection` (`consecutiveGatewayErrors: 3`, `baseEjectionTime: 30s`) so a slow external banking API cannot exhaust `payment-service` worker threads!
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Forwarding Verified JWT Claims**: In `RequestAuthentication/frontend-jwt-authn`, set `outputPayloadToHeader: x-jwt-payload` and `forwardOriginalToken: true`.
+> 2. **Exempting `/healthz` While Protecting `/checkout`**: In `AuthorizationPolicy/frontend-jwt-claim-authz`, create two rules under `spec.rules`: Rule 1 allowing unauthenticated `GET` to `["/healthz", "/readyz"]`, and Rule 2 requiring both `source.principals` (`istio-ingressgateway-service-account`) AND `source.requestPrincipals` (`https://auth.novapay.io/*`) plus `when` checks on `request.auth.claims[iss]` and `request.auth.claims[scope]`.
+> 3. **Combining Egress Circuit Breaking + Port-Level TLS Origination**: In `DestinationRule/external-stripe-httpbin-tls-cb`, put `connectionPool` and `outlierDetection` under `spec.trafficPolicy`, and put `tls: { mode: SIMPLE, sni: httpbin.org }` inside `spec.trafficPolicy.portLevelSettings` for `port.number: 443`!
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -373,6 +400,16 @@ istioctl proxy-config endpoints deploy/payment-service-v1 -n novapay-pci --clust
 ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. **Fault 1 (`403 RBAC: access denied`)**: Look at `principals` in `AuthorizationPolicy/allow-order-to-payment`: it says `cluster.local/ns/novapay-pci/sa/order-service-sa`. Which namespace does `order-service` actually run in (`novapay` or `novapay-pci`)? Also check `methods`—does `["GET"]` allow `POST /charge`?
+> 2. **Fault 2 (`503 UO` / `503 UF`)**: Look at `DestinationRule/payment-service-dr`: `maxConnections: 1`, `http2MaxRequests: 1`, and `connectTimeout: 1ms` immediately trip the circuit breaker (`UO`) or time out TCP+mTLS handshakes (`UF`).
+> 3. **Fault 3 (`503 UH` on `httpbin.org`)**: `ServiceEntry/external-httpbin` has `resolution: STATIC` with no `endpoints` IP list! Change `resolution: STATIC` back to `resolution: DNS`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA) & Complete Remediation</summary>

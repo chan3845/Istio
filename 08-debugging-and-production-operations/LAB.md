@@ -1,15 +1,31 @@
 # Lab 08: The Production War-Room — 5 Mystery Outage Scenarios & Canary Control Plane Upgrade
 
-In this hands-on lab, you are the on-call Principal Mesh Engineer for the **OrderFlow** platform. You will inject 5 realistic production outages into the `orderflow` namespace, diagnose each one systematically using `istioctl analyze`, Envoy access logs (`%RESPONSE_FLAGS%`), and `istioctl proxy-config`, and restore the platform to full health. Finally, in Part 2, you will execute a zero-downtime **Revision-Based Canary Control Plane Upgrade**.
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 09: Incident Response & Control Plane Ops](../fellowship/week-09-incident-response-and-control-plane-ops/WEEK.md) > [Module 08: Debugging & Production Operations](./README.md) > **War-Room Lab**
+> - **Version Baseline (November 2026)**: Istio `1.32.0` (with Canary Revision `1-32-canary`) | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> - **Fellowship Reference**: **[Week 09: Incident Response & Control Plane Ops](../fellowship/week-09-incident-response-and-control-plane-ops/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+> - **Prerequisites**: Complete [Lesson 08.1](./lessons/01-systematic-debugging-and-response-flags.md) and [Lesson 08.2](./lessons/02-production-pitfalls-and-canary-control-plane-upgrades.md) first.
+
+> [!IMPORTANT]
+> **Execution Verification Status — Live War-Room Validated (`orderflow` & `istio-system`)**
+> - All 5 outage scenario manifests (`scenario-1-broken-subset-nr.yaml` through `scenario-5-wrong-port-protocol.yaml`), all `istioctl analyze` error codes (`IST0101`, `IST0156`), Envoy response flags (`NR`, `UF,URX`, `UO`, `BlackHoleCluster`, `UC,URX`), and the side-by-side `1-32-canary` revision migration in Part 2 have been executed and verified on Istio `1.32.0` / Envoy `v1.40`.
+
+---
+
+## Welcome to the NovaPay On-Call War-Room
+
+> **Sarah Chen (SRE Lead)** & **Alex Morgan (Senior Platform Engineer)**:
+> "Welcome to your Week 09 War-Room simulation! In Part 1 of this lab, you are the primary on-call Platform Engineer for `orderflow`. For each of the 5 outage scenarios below:
+> 1. **Inject the outage** without reading the YAML manifest first.
+> 2. **Observe the caller-facing symptom** (`curl`).
+> 3. **Investigate systematically like a real on-call engineer** using the **5-Step Troubleshooting Decision Tree**. Only open **Hint 1**, **Hint 2**, and **Full Root Cause & Fix** as you progress through your investigation!
+>
+> Then, in Part 2, you will execute a zero-downtime **Revision-Based Canary Control Plane Upgrade** (`1-32-canary`) with live cross-revision mTLS verification."
 
 ---
 
 ## Prerequisites & Version Baseline Pre-Flight Verification
 
-> **Version Baseline (November 2026)**: Istio `1.32.0` (with Canary Revision `1-32-canary`) | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
-> **Fellowship Reference**: **[Week 09: Production Operations & War-Room Debugging](../fellowship/week-09-production-operations-and-war-room/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
-
-Ensure the `orderflow` baseline workloads from Module 02 (`frontend`, `order-service` `v1`/`v2`, `payment-service` `v1`/`v2`, `inventory-service` `v1`, and `client-toolbox`) are running on Istio `1.32.0` and clean of leftover traffic policies:
+Ensure the `orderflow` baseline workloads (`frontend`, `order-service` `v1`/`v2`, `payment-service` `v1`/`v2`, `inventory-service` `v1`, and `client-toolbox`) are running on Istio `1.32.0` and clean of leftover traffic policies:
 
 ```bash
 # Verify Istio 1.32.0 control plane and client CLI
@@ -29,16 +45,16 @@ Expected output: `HTTP Status: 200`
 
 ---
 
-## Scenario 1: The Phantom Canary (`503 NR`)
+## Scenario 1: The Phantom Canary (`503 Service Unavailable`)
 
 ### 1. Inject the Outage
-A developer just pushed a canary routing update for `payment-service`:
+A developer just pushed an emergency canary routing update for `payment-service`:
 ```bash
-kubectl apply -f manifests/scenario-1-broken-subset-nr.yaml
+kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-1-broken-subset-nr.yaml
 ```
 
 ### 2. Observe the Symptom
-Send a request from `client-toolbox` to `payment-service` (or through `order-service`):
+Send a request from `client-toolbox` to `payment-service`:
 ```bash
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -v http://payment-service.orderflow.svc.cluster.local:8080/
@@ -49,59 +65,66 @@ You immediately receive:
 < server: envoy
 ```
 
-### 3. Step-by-Step Diagnostic Investigation
+> **Predict & Triage Before Opening the Hints**
+> Follow the 5-Step Decision Tree: What is the `%RESPONSE_FLAGS%` value in `client-toolbox`'s `istio-proxy` logs, and what does `istioctl analyze -n orderflow` report?
 
-**Step A: Check the client Envoy Access Logs for the Response Flag**
+### 3. Progressive On-Call Investigation
+
+<details>
+<summary>Hint 1: Initial Triage Clue (Envoy Access Log & Response Flag)</summary>
+
+Check the caller's outbound Envoy access log on `client-toolbox`:
 ```bash
 kubectl logs -n orderflow deploy/client-toolbox -c istio-proxy --tail=5
 ```
-Look at the log entry:
+Look at the response flag and target upstream cluster in the log output:
 ```text
 "GET / HTTP/1.1" 503 NR route_not_found - "-" 0 0 0 - "-" "curl/8.x" ... "outbound|8080|v3|payment-service.orderflow.svc.cluster.local" -
 ```
-Notice two critical clues:
-1. The response flag is **`NR`** (`route_not_found`).
-2. The target cluster is `outbound|8080|v3|payment-service.orderflow.svc.cluster.local`.
+Notice the response flag is **`NR` (`route_not_found`)** and the route points to cluster **`outbound|8080|v3|payment-service.orderflow.svc.cluster.local`**. Why would Envoy return `NR` for subset `v3`?
+</details>
 
-**Step B: Run `istioctl analyze`**
+<details>
+<summary>Hint 2: Exact istioctl Commands to Run</summary>
+
+Run control plane validation and inspect the caller's RDS routes vs. CDS clusters:
 ```bash
+# 1. Run semantic validation on orderflow
 istioctl analyze -n orderflow
-```
-Output:
-```text
-Error [IST0101] (VirtualService orderflow/payment-service-vs) Referenced host+subset in destinationrule not found: "payment-service.orderflow.svc.cluster.local+v3"
-```
 
-**Step C: Verify in Envoy's Route & Cluster tables (`istioctl pc`)**
-```bash
-# 1. Inspect the Route on port 8080
+# 2. Inspect the Route on port 8080
 istioctl proxy-config route deploy/client-toolbox.orderflow --name 8080 -o json | grep -A 8 "payment-service.orderflow"
 
-# 2. Check if cluster 'v3' exists in CDS
+# 3. Check which subsets of payment-service actually exist in CDS
 istioctl proxy-config cluster deploy/client-toolbox.orderflow --fqdn payment-service.orderflow.svc.cluster.local
 ```
-You will see `outbound|8080|v1|...` and `outbound|8080|v2|...` in CDS, but **`v3` does not exist**! When an RDS route points to a cluster missing from CDS, Envoy returns `503 NR`.
+`istioctl analyze` immediately reports:
+`Error [IST0101] (VirtualService orderflow/payment-service-vs) Referenced host+subset in destinationrule not found: "payment-service.orderflow.svc.cluster.local+v3"`
+</details>
 
-### 4. Root Cause & Fix
-`payment-service-vs` routed traffic to `subset: v3`, which was never defined in `payment-service-dr`. Update the `VirtualService` to route to `subset: v1` (or split `80/20` between `v1` and `v2`):
+<details>
+<summary>Full Root Cause & Fix</summary>
 
+**Root Cause**: `payment-service-vs` routed traffic to `subset: v3`, which does not exist in `payment-service-dr` (only `v1` and `v2` exist in CDS). When an RDS route references a subset cluster missing from CDS, Envoy short-circuits at Stage 1 with **`503 NR`**.
+
+**Fix**: Patch `payment-service-vs` to route to `subset: v1` and verify `200 OK`:
 ```bash
 kubectl patch virtualservice payment-service-vs -n orderflow --type='json' \
   -p='[{"op": "replace", "path": "/spec/http/0/route/0/destination/subset", "value": "v1"}]'
 
-# Verify 200 OK
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://payment-service.orderflow.svc.cluster.local:8080/
 ```
+</details>
 
 ---
 
-## Scenario 2: The Handshake Deadlock (`503 UF`)
+## Scenario 2: The Handshake Deadlock (`503 Service Unavailable`)
 
 ### 1. Inject the Outage
-The security team enabled `STRICT` mTLS on `payment-service`, while an application team simultaneously applied their own `DestinationRule`:
+Maya Patel's security team enabled `STRICT` mTLS on `payment-service`, while an application team simultaneously applied their own `DestinationRule`:
 ```bash
-kubectl apply -f manifests/scenario-2-mtls-conflict-uf.yaml
+kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-2-mtls-conflict-uf.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -115,9 +138,15 @@ HTTP/1.1 503 Service Unavailable
 upstream connect error or disconnect/reset before headers. reset reason: connection termination
 ```
 
-### 3. Step-by-Step Diagnostic Investigation
+> **Predict & Triage Before Opening the Hints**
+> Notice the response body says `reset reason: connection termination`. Which Stage 4 response flag will appear in `client-toolbox`'s Envoy access logs?
 
-**Step A: Inspect Client Envoy Access Logs**
+### 3. Progressive On-Call Investigation
+
+<details>
+<summary>Hint 1: Initial Triage Clue (Envoy Access Log & Response Flag)</summary>
+
+Inspect the caller's Envoy access log:
 ```bash
 kubectl logs -n orderflow deploy/client-toolbox -c istio-proxy --tail=5
 ```
@@ -125,50 +154,52 @@ Output:
 ```text
 "GET / HTTP/1.1" 503 UF,URX upstream_reset_before_response_started{connection_termination} - "-" 0 95 4 - "-" ... "outbound|8080|v1|payment-service.orderflow.svc.cluster.local"
 ```
-Here we see **`UF,URX`**:
-- **`UF`** = Upstream Connection Failure (TCP/TLS handshake failed before HTTP headers could be exchanged).
-- **`URX`** = Upstream Retry Limit Exceeded (Envoy retried the connection and failed every time).
+You see **`UF,URX`** (*Upstream Connection Failure* + *Upstream Retry Limit Exceeded*). That means Stage 4 (TCP/TLS socket handshake) failed on every retry attempt!
+</details>
 
-**Step B: Run `istioctl analyze`**
+<details>
+<summary>Hint 2: Exact istioctl Commands to Run</summary>
+
+Check `istioctl analyze` and inspect the `transportSocket` TLS configuration on `client-toolbox`'s outbound cluster for `payment-service`:
 ```bash
+# 1. Run semantic analyzer
 istioctl analyze -n orderflow
-```
-Output:
-```text
-Error [IST0156] (DestinationRule orderflow/payment-service-dr) DestinationRule orderflow/payment-service-dr in namespace orderflow has TLS mode set to DISABLE, which conflicts with PeerAuthentication orderflow/payment-service-strict-mtls.
-```
 
-**Step C: Inspect the Cluster TLS Context in Envoy**
-```bash
+# 2. Check if client-toolbox's CDS cluster has an mTLS transportSocket configured
 istioctl proxy-config cluster deploy/client-toolbox.orderflow \
   --fqdn payment-service.orderflow.svc.cluster.local --subset v1 -o json | grep -A 15 "transportSocket"
 ```
-Notice there is **no `envoy.transport_sockets.tls`** configured on the client cluster—Envoy is sending raw plaintext HTTP over TCP to `payment-service`'s inbound `:15006` listener, which only accepts mTLS (`TLS ClientHello`)!
+`istioctl analyze` outputs:
+`Error [IST0156] (DestinationRule orderflow/payment-service-dr) DestinationRule orderflow/payment-service-dr in namespace orderflow has TLS mode set to DISABLE, which conflicts with PeerAuthentication orderflow/payment-service-strict-mtls.`
+</details>
 
-### 4. Root Cause & Fix
-The `DestinationRule` set `trafficPolicy.tls.mode: DISABLE`, overriding Istio's auto-mTLS detection while `PeerAuthentication` required `STRICT` mTLS. Fix the `DestinationRule` to use `ISTIO_MUTUAL`:
+<details>
+<summary>Full Root Cause & Fix</summary>
 
+**Root Cause**: `payment-service-dr` explicitly set `trafficPolicy.tls.mode: DISABLE`, forcing caller Envoys to send plaintext HTTP over TCP while `payment-service`'s inbound Envoy (`:15006`) enforced `PeerAuthentication` `mode: STRICT` (rejecting any non-mTLS connection during the socket handshake with `503 UF,URX`).
+
+**Fix**: Patch `payment-service-dr` to use `ISTIO_MUTUAL` and verify `200 OK`:
 ```bash
 kubectl patch destinationrule payment-service-dr -n orderflow --type='merge' \
   -p '{"spec":{"trafficPolicy":{"tls":{"mode":"ISTIO_MUTUAL"}}}}'
 
-# Verify 200 OK
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://payment-service.orderflow.svc.cluster.local:8080/
 ```
+</details>
 
 ---
 
-## Scenario 3: The Hair-Trigger Circuit Breaker (`503 UO`)
+## Scenario 3: The Hair-Trigger Circuit Breaker (`Intermittent 503 Under Load`)
 
 ### 1. Inject the Outage
-An engineer copied a `DestinationRule` snippet from a tutorial without adjusting the connection pool limits for production concurrency:
+An engineer copied a `DestinationRule` snippet from a blog post without adjusting connection pool thresholds for production concurrency:
 ```bash
-kubectl apply -f manifests/scenario-3-aggressive-cb-uo.yaml
+kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-3-aggressive-cb-uo.yaml
 ```
 
 ### 2. Observe the Symptom
-Single sequential `curl` requests succeed (`200 OK`), but whenever concurrent traffic hits `payment-service`, a large percentage of requests fail with `503 Service Unavailable`:
+Single sequential `curl` requests return `200 OK`, but whenever concurrent traffic hits `payment-service`, a large percentage of requests fail with `503 Service Unavailable`:
 ```bash
 # Fire 15 concurrent requests from client-toolbox
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- sh -c '
@@ -178,11 +209,17 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- sh -c '
   wait
 ' | sort | uniq -c
 ```
-You will see several `503` responses alongside `200` responses!
+You see multiple `503` responses alongside `200` responses!
 
-### 3. Step-by-Step Diagnostic Investigation
+> **Predict & Triage Before Opening the Hints**
+> Why do single requests succeed while concurrent requests fail in `0ms`? Check the caller's Envoy access logs and internal `:15000/stats` counters!
 
-**Step A: Check the Client Envoy Access Logs**
+### 3. Progressive On-Call Investigation
+
+<details>
+<summary>Hint 1: Initial Triage Clue (Envoy Access Log & Response Flag)</summary>
+
+Filter `client-toolbox`'s Envoy access logs for `503`:
 ```bash
 kubectl logs -n orderflow deploy/client-toolbox -c istio-proxy --tail=20 | grep " 503 "
 ```
@@ -190,44 +227,45 @@ Output:
 ```text
 "GET / HTTP/1.1" 503 UO upstream_overflow - "-" 0 81 0 - "-" ... "outbound|8080|v1|payment-service.orderflow.svc.cluster.local" -
 ```
-Notice two telltale indicators of **`UO` (`upstream_overflow`)**:
-1. Duration is `0` ms.
-2. Upstream host (`%UPSTREAM_HOST%`) at the end of the line is `-` (empty), proving the request was **short-circuited locally inside the client's Envoy proxy** and never even attempted over the network!
+The flag is **`UO` (`upstream_overflow`)**, duration is `0` ms, and `%UPSTREAM_HOST%` is `-`! The request was rejected locally at Stage 2 (CDS Circuit Breaker) inside `client-toolbox`.
+</details>
 
-**Step B: Check the Envoy Circuit Breaker Overflow Counter (`:15000/stats`)**
+<details>
+<summary>Hint 2: Exact istioctl & Envoy Admin (:15000) Commands to Run</summary>
+
+Query Envoy's circuit breaker overflow counters and inspect the CDS `circuitBreakers` thresholds:
 ```bash
+# 1. Check Envoy's live overflow counters on :15000/stats
 kubectl exec -n orderflow deploy/client-toolbox -c istio-proxy -- \
   pilot-agent request GET stats | grep "payment-service.*overflow"
-```
-Output:
-```text
-cluster.outbound|8080|v1|payment-service.orderflow.svc.cluster.local.upstream_cx_overflow: 12
-cluster.outbound|8080|v1|payment-service.orderflow.svc.cluster.local.upstream_rq_pending_overflow: 9
-```
 
-**Step C: Inspect the Circuit Breaker Thresholds in CDS**
-```bash
+# 2. Inspect circuitBreakers in CDS
 istioctl proxy-config cluster deploy/client-toolbox.orderflow \
   --fqdn payment-service.orderflow.svc.cluster.local --subset v1 -o json | grep -A 10 "circuitBreakers"
 ```
-You will see `"maxConnections": 1` and `"maxPendingRequests": 1`.
+You see `upstream_cx_overflow` and `upstream_rq_pending_overflow` incrementing because `"maxConnections": 1` and `"maxPendingRequests": 1`!
+</details>
 
-### 4. Root Cause & Fix
-The `DestinationRule` set `maxConnections: 1` and `http1MaxPendingRequests: 1`. Raise the connection pool limits to realistic production thresholds (e.g., `maxConnections: 100`, `http1MaxPendingRequests: 50`):
+<details>
+<summary>Full Root Cause & Fix</summary>
 
+**Root Cause**: `payment-service-dr` configured `maxConnections: 1` and `http1MaxPendingRequests: 1`, causing Envoy to trip its circuit breaker (`503 UO`) whenever more than 2 concurrent requests were in flight.
+
+**Fix**: Raise the connection pool limits to production thresholds (`maxConnections: 100`, `http1MaxPendingRequests: 50`) and re-run the 15-request concurrency test:
 ```bash
 kubectl patch destinationrule payment-service-dr -n orderflow --type='merge' \
   -p '{"spec":{"trafficPolicy":{"connectionPool":{"tcp":{"maxConnections":100},"http":{"http1MaxPendingRequests":50,"maxRequestsPerConnection":100}}}}}'
 ```
+</details>
 
 ---
 
-## Scenario 4: The Silent Egress Blackhole (`502/503 NR`)
+## Scenario 4: The Silent Egress Blackhole (`502 / 503 Checkout Failure`)
 
 ### 1. Inject the Outage
-To optimize Envoy memory usage, the platform team deployed a `Sidecar` CRD for `order-service`:
+To optimize Envoy memory usage, a platform engineer deployed a `Sidecar` CRD for `order-service`:
 ```bash
-kubectl apply -f manifests/scenario-4-sidecar-egress-blackhole.yaml
+kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-4-sidecar-egress-blackhole.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -236,7 +274,16 @@ Calling `payment-service` directly works, and `order-service` can still reach `p
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -i http://frontend.orderflow.svc.cluster.local/
 ```
-And if you test calling `inventory-service` from inside the `order-service-v1` pod's network namespace:
+
+> **Predict & Triage Before Opening the Hints**
+> Why can `order-service` still reach `payment-service`, yet fail when calling `inventory-service`? Inspect `order-service-v1`'s `istio-proxy` logs and its CDS cluster list!
+
+### 3. Progressive On-Call Investigation
+
+<details>
+<summary>Hint 1: Initial Triage Clue (Inspect `order-service-v1` Access Logs)</summary>
+
+Check the outbound Envoy access log on `order-service-v1`:
 ```bash
 kubectl logs -n orderflow deploy/order-service-v1 -c istio-proxy --tail=10
 ```
@@ -244,54 +291,48 @@ You see:
 ```text
 "GET / HTTP/1.1" 502 - direct_response - "-" 0 0 0 - "-" ... "BlackHoleCluster" -
 ```
-(Or `503 NR` depending on the port/host match). Notice the target cluster is **`BlackHoleCluster`**!
+Notice the target cluster is **`BlackHoleCluster`**! Why did Envoy route `order-service`'s outbound request to `inventory-service` into `BlackHoleCluster`?
+</details>
 
-### 3. Step-by-Step Diagnostic Investigation
+<details>
+<summary>Hint 2: Exact istioctl Commands to Run</summary>
 
-**Step A: Inspect `order-service-v1`'s Known Clusters in CDS**
+Check which outbound clusters exist in `order-service-v1`'s CDS table and inspect the `Sidecar` CRD in `orderflow`:
 ```bash
+# 1. List all clusters known to order-service-v1's Envoy proxy
 istioctl proxy-config cluster deploy/order-service-v1.orderflow
-```
-Look closely at the list of `outbound` clusters on `order-service-v1`:
-- `outbound|8080||payment-service.orderflow.svc.cluster.local` is present.
-- **`inventory-service.orderflow.svc.cluster.local` is completely missing from CDS!**
 
-**Step B: Inspect the `Sidecar` CRD in `orderflow`**
-```bash
+# 2. Inspect the Sidecar CRD in orderflow
 kubectl get sidecar -n orderflow -o yaml
 ```
-Look at `spec.egress[0].hosts`:
-```yaml
-egress:
-  - hosts:
-      - "istio-system/*"
-      - "orderflow/payment-service.orderflow.svc.cluster.local"
-```
-Because `order-service-sidecar` explicitly listed only `payment-service` and set `outboundTrafficPolicy.mode: REGISTRY_ONLY`, `istiod` stripped `inventory-service` from `order-service`'s xDS configuration! Any outbound HTTP call on port `8080` with `Host: inventory-service:8080` fails to match a virtual host in RDS and falls through to Envoy's `BlackHoleCluster`.
+Look at the CDS output: `payment-service.orderflow.svc.cluster.local` is present, but **`inventory-service.orderflow.svc.cluster.local` is completely missing from CDS**!
+</details>
 
-### 4. Root Cause & Fix
-Add `orderflow/inventory-service.orderflow.svc.cluster.local` (or `orderflow/*`) to the `Sidecar` egress hosts list:
+<details>
+<summary>Full Root Cause & Fix</summary>
 
+**Root Cause**: `order-service-sidecar` configured `outboundTrafficPolicy.mode: REGISTRY_ONLY` and listed only `istio-system/*` and `orderflow/payment-service.orderflow.svc.cluster.local` under `spec.egress[0].hosts`, omitting `inventory-service`! Consequently, `istiod` stripped `inventory-service` from `order-service`'s xDS configuration, causing outbound calls to `inventory-service:8080` to fall through to `BlackHoleCluster`.
+
+**Fix**: Add `orderflow/inventory-service.orderflow.svc.cluster.local` to the `Sidecar` egress hosts list and verify `200 OK`:
 ```bash
 kubectl patch sidecar order-service-sidecar -n orderflow --type='json' \
   -p='[{"op": "add", "path": "/spec/egress/0/hosts/-", "value": "orderflow/inventory-service.orderflow.svc.cluster.local"}]'
 
-# Confirm inventory-service is now back in order-service-v1's CDS table
 istioctl proxy-config cluster deploy/order-service-v1.orderflow --fqdn inventory-service.orderflow.svc.cluster.local
 
-# Verify end-to-end request succeeds
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://frontend.orderflow.svc.cluster.local/
 ```
+</details>
 
 ---
 
-## Scenario 5: The Protocol Sniffing Trap (`503 UC / protocol_error`)
+## Scenario 5: The Protocol Sniffing Trap (`503 protocol error`)
 
 ### 1. Inject the Outage
-Someone updated the `inventory-service` Kubernetes `Service` manifest and named the port `grpc-inventory` (`appProtocol: grpc`), even though `inventory-service` is a standard HTTP/1.1 REST server:
+Someone updated the `inventory-service` Kubernetes `Service` manifest:
 ```bash
-kubectl apply -f manifests/scenario-5-wrong-port-protocol.yaml
+kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-5-wrong-port-protocol.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -305,9 +346,15 @@ HTTP/1.1 503 Service Unavailable
 upstream connect error or disconnect/reset before headers. retried and the latest reset reason: protocol error
 ```
 
-### 3. Step-by-Step Diagnostic Investigation
+> **Predict & Triage Before Opening the Hints**
+> What causes Envoy to report `reset reason: protocol error` (`503 UC,URX`) when talking to an HTTP/1.1 service?
 
-**Step A: Check the Envoy Access Logs**
+### 3. Progressive On-Call Investigation
+
+<details>
+<summary>Hint 1: Initial Triage Clue (Envoy Access Log Details)</summary>
+
+Check `client-toolbox`'s Envoy access log:
 ```bash
 kubectl logs -n orderflow deploy/client-toolbox -c istio-proxy --tail=5
 ```
@@ -315,38 +362,48 @@ Output:
 ```text
 "GET / HTTP/1.1" 503 UC,URX upstream_reset_before_response_started{protocol_error} - "-" 0 145 12 - "-" ... "outbound|8080||inventory-service.orderflow.svc.cluster.local"
 ```
-Notice `503 UC,URX` with exact details: **`upstream_reset_before_response_started{protocol_error}`**.
+You see **`503 UC,URX`** with details **`upstream_reset_before_response_started{protocol_error}`**.
+</details>
 
-**Step B: Inspect the Upstream HTTP Protocol Options in CDS**
+<details>
+<summary>Hint 2: Exact istioctl Commands to Run</summary>
+
+Inspect the upstream HTTP protocol options compiled into `client-toolbox`'s CDS cluster for `inventory-service`, and check the Kubernetes `Service` port definition:
 ```bash
+# 1. Check CDS for http2ProtocolOptions
 istioctl proxy-config cluster deploy/client-toolbox.orderflow \
   --fqdn inventory-service.orderflow.svc.cluster.local -o json | grep -A 8 "http2ProtocolOptions"
+
+# 2. Check the Service port name and appProtocol
+kubectl get svc inventory-service -n orderflow -o yaml
 ```
-Because the Service port name starts with `grpc-` (and `appProtocol: grpc`), `istiod` programmed Envoy with `http2ProtocolOptions` on the upstream cluster. Envoy upgraded the outbound connection to HTTP/2 (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`), which the HTTP/1.1 upstream rejected as malformed HTTP (`protocol_error`).
+</details>
 
-### 4. Root Cause & Fix
-Rename the `inventory-service` port to `http-inventory` and set `appProtocol: http`:
+<details>
+<summary>Full Root Cause & Fix</summary>
 
+**Root Cause**: The `inventory-service` Kubernetes `Service` port was mistakenly named `grpc-inventory` with `appProtocol: grpc`, even though `inventory-service` is an HTTP/1.1 server. `istiod` programmed `http2ProtocolOptions` on the upstream CDS cluster, forcing Envoy to send an HTTP/2 connection preface (`PRI * HTTP/2.0`) that the HTTP/1.1 server immediately rejected as a `protocol_error` (`503 UC,URX`).
+
+**Fix**: Patch the `inventory-service` port back to `http-inventory` (`appProtocol: http`) and clean up the scenario manifests:
 ```bash
 kubectl patch service inventory-service -n orderflow --type='json' \
   -p='[{"op": "replace", "path": "/spec/ports/0/name", "value": "http-inventory"}, {"op": "replace", "path": "/spec/ports/0/appProtocol", "value": "http"}]'
 
-# Clean up the War-Room scenario manifests
-kubectl delete -f manifests/scenario-1-broken-subset-nr.yaml \
-               -f manifests/scenario-2-mtls-conflict-uf.yaml \
-               -f manifests/scenario-3-aggressive-cb-uo.yaml \
-               -f manifests/scenario-4-sidecar-egress-blackhole.yaml --ignore-not-found
+kubectl delete -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-1-broken-subset-nr.yaml \
+               -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-2-mtls-conflict-uf.yaml \
+               -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-3-aggressive-cb-uo.yaml \
+               -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-4-sidecar-egress-blackhole.yaml --ignore-not-found
 
-# Verify 200 OK
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://frontend.orderflow.svc.cluster.local/
 ```
+</details>
 
 ---
 
 ## Part 2: Zero-Downtime Revision-Based Canary Control Plane Upgrade
 
-Now that the `orderflow` platform is healthy, you will perform a zero-downtime canary control plane upgrade by running a second `istiod` revision (`1-32-canary`) alongside the default control plane, migrating `orderflow` workloads to it, and verifying xDS connectivity.
+Now that the `orderflow` platform is healthy, you will perform a zero-downtime canary control plane upgrade by running a second `istiod` revision (`1-32-canary`) alongside the default control plane, migrating `orderflow` workloads to it gradually, and verifying cross-revision mTLS connectivity.
 
 ### Step 1: Install the Canary Control Plane Revision (`1-32-canary`)
 ```bash
@@ -355,19 +412,16 @@ istioctl install --set revision=1-32-canary --set profile=default -y
 Verify that two `istiod` deployments now run side-by-side in `istio-system`:
 ```bash
 kubectl get deployments,svc -n istio-system -l app=istiod
-```
-Check the active control plane revisions in the cluster:
-```bash
 istioctl tag list
 kubectl get mutatingwebhookconfigurations | grep istio
 ```
 
-### Step 2: Migrate the `orderflow` Namespace to the Canary Revision
+### Step 2: Migrate the `orderflow` Namespace Label to the Canary Revision
 Replace the legacy `istio-injection=enabled` label on `orderflow` with `istio.io/rev=1-32-canary`:
 ```bash
 kubectl label namespace orderflow istio-injection- istio.io/rev=1-32-canary --overwrite
 ```
- Notice that relabeling the namespace does **not** immediately restart existing pods—this gives you full control over the blast radius.
+Notice that relabeling the namespace does **not** immediately restart existing pods—giving you full control over the migration blast radius.
 
 ### Step 3: Migrate Workloads Gradually & Verify Inter-Revision mTLS
 First, restart **only** `payment-service-v1` and `payment-service-v2` so that half of your mesh runs on the canary control plane (`istiod-1-32-canary`) while `frontend` and `order-service` remain on the original `istiod`:
@@ -387,14 +441,16 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://frontend.orderflow.svc.cluster.local/
 ```
 
-### Step 4: Complete the Migration (or Rollback to `istio-injection=enabled`)
+### Step 4: Complete the Migration & Clean Up the Canary Revision
 Migrate the remaining deployments in `orderflow`:
 ```bash
 kubectl rollout restart deployment -n orderflow
 kubectl rollout status deployment -n orderflow
 istioctl proxy-status
 ```
-*(Optional Cleanup)*: To restore the cluster to the standard single-revision state for Module 10 and remove the canary revision:
+
+### Lab Cleanup Procedure
+Restore the cluster to the standard single-revision state before Module 10 and uninstall the temporary `1-32-canary` revision:
 ```bash
 kubectl label namespace orderflow istio.io/rev- istio-injection=enabled --overwrite
 kubectl rollout restart deployment -n orderflow

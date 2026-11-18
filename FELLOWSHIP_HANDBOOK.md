@@ -1,8 +1,10 @@
 # Istio Service Mesh Engineering Fellowship — Cohort 01 (`FELLOWSHIP_HANDBOOK.md`)
 
+> **[Fellowship Portal](./README.md) · [Progression Dashboard](./PROGRESSION_DASHBOARD.md) · [Version Baseline (`Istio 1.32.0`)](./VERSIONS.md) · [Compatibility Matrix](./COMPATIBILITY.md) · [Start Week 01 ->](./fellowship/week-01-platform-onboarding/WEEK.md)**
+
 Welcome to **Cohort 01** of the **Istio Service Mesh Engineering Fellowship**.
 
-This program is not a passive video course or a collection of isolated command tutorials. It is structured as an intensive, 10-week **Platform Engineering Residency** where you join the infrastructure engineering team at **NovaPay**, take ownership of production service-mesh tickets, debug live outage simulations, defend your architectural trade-offs in design reviews, and graduate only after demonstrating production-level competency.
+This program is not a passive video course or a collection of isolated command references. It is structured as an intensive, 10-week **Platform Engineering Apprenticeship** where you join the infrastructure engineering team at **NovaPay**, take ownership of production service-mesh tickets, debug live outage simulations, defend your architectural trade-offs in design reviews, and graduate only after demonstrating production-level competency.
 
 ---
 
@@ -27,94 +29,75 @@ Throughout the fellowship, you will collaborate with—and defend your designs a
 
 | Engineer | Role | Technical Focus & Perspective | Signature Question in Reviews |
 | :--- | :--- | :--- | :--- |
-| **Alex Morgan** | **Senior Platform Engineer & Primary Mentor** | Your direct mentor. Pragmatic systems architect who refuses to treat Istio as a "magic black box." Insists that you inspect Envoy xDS state (`LDS`, `RDS`, `CDS`, `EDS`, `SDS`), Linux `iptables`/CNI packet flows, and control-plane memory scaling before merging any YAML. | *"Don't just tell me the `VirtualService` YAML applied cleanly—what did `istioctl proxy-config` compile it into inside Envoy, and what happens if that CRD is applied in the wrong order?"* |
+| **Alex Morgan** | **Senior Platform Engineer & Primary Mentor** | Your direct mentor. Approachable, technically brilliant, pragmatic, and occasionally humorous. Refuses to treat Istio as a "magic black box." Insists that you inspect Envoy xDS state (`LDS`, `RDS`, `CDS`, `EDS`, `SDS`), Linux `iptables`/CNI packet flows, and control-plane memory scaling before merging any YAML. | *"Don't just tell me the `VirtualService` YAML applied cleanly—what did `istiod` compile it into inside Envoy, and what happens if that CRD is applied in the wrong order?"* |
 | **Sarah Chen** | **Site Reliability Engineering (SRE) Lead** | Owns NovaPay's `99.99%` availability SLO, P99 tail latency, incident response, and control-plane upgrades. Deeply skeptical of unbounded retries, un-scoped Envoy memory consumption, and control plane single points of failure. Leads Friday Incident Drills. | *"How does this configuration behave at 3:00 AM when `payment-service-v2` starts returning `503`s under peak load—does it fail fast or trigger a cascading retry storm?"* |
 | **Daniel Brooks** | **Staff Backend Engineer** | Leads the Checkout & Payment application teams (`frontend`, `order-service`, `payment-service`). Wants fast releases, clean APIs (prefers **Kubernetes Gateway API** over vendor-specific CRDs), and zero application code changes. Frustrated when sidecars break his batch jobs or cause mysterious `503 UF`/`NR` errors. | *"Why is the mesh rejecting my service's connections, and how much CPU/memory tax are your sidecars adding to my pods compared to Ambient mode?"* |
 | **Maya Patel** | **Principal Security Engineer** | Leads NovaPay's PCI-DSS Level 1 certification. Uncompromising on Zero-Trust networking: cryptographic SPIFFE identity (`spiffe://cluster.local/ns/<ns>/sa/<sa>`), `STRICT` mTLS, default-deny (`allow-nothing`) `AuthorizationPolicy`, JWT claim verification, and `REGISTRY_ONLY` egress control. | *"If an attacker compromises the `frontend` container, what mathematically prevents them from calling `payment-service` or exfiltrating card data to an arbitrary external IP?"* |
 
 ---
 
-## 3. The 10-Week Cohort Roadmap
+## 3. Our Pedagogical Architecture: The 12-Stage Teaching Flow & Progressive Disclosure
 
-The fellowship is organized into **four progressive phases** across **10 weeks**:
+To ensure you develop genuine platform engineering judgment rather than superficial YAML familiarity, every major learning unit in the fellowship follows a structured **12-Stage Apprenticeship Flow**:
+
+1. **Engineering Context**: What is happening right now at NovaPay?
+2. **The Challenge**: What production problem, incident, or requirement must be solved?
+3. **Alex's Briefing**: Alex Morgan frames the situation, shares a production war story, and challenges your initial assumptions.
+4. **Build Intuition**: Introduce the core mechanism using a concrete mental model or systems analogy before diving into API specs.
+5. **Technical Explanation**: Explain the Istio/Envoy mechanism accurately using **4-Tier Progressive Disclosure**:
+   - **Core Concept**: *What must I understand right now?*
+   - **Technical Deep Dive**: *How does it actually work inside Envoy and `istiod`?*
+   - **Engineering Insight**: *What subtle edge cases matter at 3:00 AM in production?*
+   - **Advanced Exploration**: *What should I investigate next?*
+6. **Under the Hood & 6-Part Diagram Walkthroughs**: Every major architecture or sequence diagram includes a step-by-step walkthrough answering: *(1) What initiates the operation? (2) Which component receives it? (3) What information is exchanged? (4) What changes in the system? (5) How can you observe it? (6) What happens if a component fails?*
+7. **Guided Implementation**: Build and verify the solution step-by-step in the module's `LAB.md`, using **"Predict Before You Execute"** prompts.
+8. **Investigation**: Inspect live Envoy xDS dumps (`istioctl proxy-config`), Envoy Admin `:15000/stats`, Prometheus metrics, and access logs.
+9. **Failure Simulation**: Introduce deliberately broken configurations (`INC-01` through `INC-10`) and use **Progressive Hints** before revealing root causes.
+10. **Production Review**: Defend trade-offs (latency, memory overhead, blast radius, security) in Saturday Architecture Reviews.
+11. **Knowledge Check**: Test mechanism comprehension and behavior prediction rather than rote memorization.
+12. **Engineering Deliverable**: Complete an independent engineering assignment (`NP-101` through `NP-110`) with verifiable acceptance criteria.
+
+---
+
+## 4. The 10-Week Cohort Roadmap
 
 ```mermaid
 flowchart LR
     subgraph P1["Phase 1: Foundation & Architecture"]
         W1["Week 01: Platform Onboarding &<br/>Control Plane Foundation<br/>(Module 00)"]
-        W2["Week 02: Envoy xDS Internals,<br/>Interception & Ambient Mode<br/>(Module 01)"]
+        W2["Week 02: Envoy xDS Internals,<br/>Interception & Ambient Mode<br/>(Module 01: 4 Lessons)"]
     end
 
     subgraph P2["Phase 2: Core Service Mesh Engineering"]
-        W3["Week 03: Service Discovery,<br/>L7 Routing & Sidecar Scoping<br/>(Module 02)"]
-        W4["Week 04: Edge Gateways,<br/>Gateway API & Egress Control<br/>(Module 03)"]
-        W5["Week 05: Zero-Trust Security:<br/>mTLS, JWT & AuthorizationPolicy<br/>(Module 04)"]
+        W3["Week 03: Service Discovery,<br/>L7 Routing & Sidecar Scoping<br/>(Module 02: 3 Lessons)"]
+        W4["Week 04: Edge Gateways,<br/>Gateway API & Egress Control<br/>(Module 03: 3 Lessons)"]
+        W5["Week 05: Zero-Trust Security:<br/>mTLS, JWT & AuthorizationPolicy<br/>(Module 04: 3 Lessons)"]
     end
 
     subgraph P3["Phase 3: Production Reliability & Operations"]
-        W6["Week 06: Resilience Engineering:<br/>Timeouts, Retries & Circuit Breaking<br/>(Module 05)"]
-        W7["Week 07: Progressive Delivery:<br/>Mirroring, Canary & Blue-Green<br/>(Module 06)"]
-        W8["Week 08: Observability:<br/>Golden Signals, Telemetry & Tracing<br/>(Module 07)"]
+        W6["Week 06: Resilience Engineering:<br/>Timeouts, Retries & Circuit Breaking<br/>(Module 05: 3 Lessons)"]
+        W7["Week 07: Progressive Delivery:<br/>Mirroring, Canary & Blue-Green<br/>(Module 06: 2 Lessons)"]
+        W8["Week 08: Observability:<br/>Golden Signals, Telemetry & Tracing<br/>(Module 07: 3 Lessons)"]
     end
 
     subgraph P4["Phase 4: Advanced Architecture & Graduation"]
-        W9["Week 09: War-Room Debugging &<br/>Canary Control Plane Upgrades<br/>(Modules 08 & 09)"]
+        W9["Week 09: War-Room Debugging &<br/>Canary Control Plane Upgrades<br/>(Modules 08 & 09: 3 Lessons)"]
         W10["Week 10: NovaPay PCI Production<br/>Capstone & Graduation Defense<br/>(Module 10)"]
     end
 
     W1 --> W2 --> W3 --> W4 --> W5 --> W6 --> W7 --> W8 --> W9 --> W10
 ```
 
-| Phase | Week | Cohort Topic & Engineering Ticket | Mapped Core Technical Module |
-| :--- | :--- | :--- | :--- |
-| **Phase 1** | **[Week 01](./fellowship/week-01-platform-onboarding/WEEK.md)** | `NP-101`: Cluster Topology, Helm vs. `istioctl` Profiles (`Istio 1.32.0`), CNI Audit & OrderFlow Baseline | **[Module 00: Environment Setup](./00-environment-setup/README.md)** |
-| **Phase 1** | **[Week 02](./fellowship/week-02-dataplane-internals-and-ambient/WEEK.md)** | `NP-102`: Dissecting Envoy xDS (`LDS`/`RDS`/`CDS`/`EDS`), `iptables` Interception & Sidecar vs. Ambient (`ztunnel` + Waypoints) | **[Module 01: Architecture & Internals](./01-architecture-and-internals/README.md)** |
-| **Phase 2** | **[Week 03](./fellowship/week-03-service-discovery-and-l7-routing/WEEK.md)** | `NP-103`: Solving L4/gRPC Skew, Subsets, Evaluation Order Trap, Ring-Hash Affinity & `Sidecar` Memory Scoping | **[Module 02: Discovery & Routing](./02-service-discovery-and-routing/README.md)** |
-| **Phase 2** | **[Week 04](./fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)** | `NP-104`: North-South TLS Ingress, Kubernetes Gateway API (`v1.6.1`), `REGISTRY_ONLY` Egress & TLS Origination | **[Module 03: Gateways, Ingress & Egress](./03-gateways-ingress-and-egress/README.md)** |
-| **Phase 2** | **[Week 05](./fellowship/week-05-zero-trust-security-architecture/WEEK.md)** | `NP-105`: SPIFFE/SDS Lifecycle, `STRICT` mTLS Migration, JWT Authn & Default-Deny `AuthorizationPolicy` | **[Module 04: Security — mTLS & Authz](./04-security-mtls-and-authz/README.md)** |
-| **Phase 3** | **[Week 06](./fellowship/week-06-resilience-and-chaos-engineering/WEEK.md)** | `NP-106`: Stopping Retry Storms, Timeout Math, `connectionPool` Circuit Breakers (`503 UO`), `outlierDetection` & Chaos Faults | **[Module 05: Resilience & Fault Injection](./05-resilience-and-fault-injection/README.md)** |
-| **Phase 3** | **[Week 07](./fellowship/week-07-progressive-delivery-and-safe-releases/WEEK.md)** | `NP-107`: Asynchronous Traffic Shadowing (`-shadow`), Dark Launches, Staged Canary & Argo Rollouts | **[Module 06: Progressive Delivery](./06-progressive-delivery/README.md)** |
-| **Phase 3** | **[Week 08](./fellowship/week-08-observability-and-golden-signals/WEEK.md)** | `NP-108`: Source vs. Destination Metrics, `Telemetry` CRD, CEL Error-Only JSON Logs & W3C Distributed Tracing | **[Module 07: Observability & Telemetry](./07-observability-and-telemetry/README.md)** |
-| **Phase 4** | **[Week 09](./fellowship/week-09-incident-response-and-control-plane-ops/WEEK.md)** | `NP-109`: 5-Scenario Production War-Room, Envoy Response Flags, Native Sidecar Lifecycle & Revision Canary Upgrades (`1-31-0` $\rightarrow$ `1-32-0`) | **[Module 08: Debugging & Operations](./08-debugging-and-production-operations/README.md)** & **[Module 09: Checklists](./09-production-checklists-and-reference/README.md)** |
-| **Phase 4** | **[Week 10](./fellowship/week-10-capstone-and-graduation-defense/WEEK.md)** | `NP-110`: Multi-Namespace NovaPay + PCI Vault Production Implementation, Final Chaos Drill & Graduation Defense | **[Module 10: Capstone Project](./10-capstone-project/README.md)** |
-
 ---
 
-## 4. The 7-Day Weekly Cohort Rhythm (Self-Paced)
+## 5. The 7-Day Weekly Cohort Rhythm (Self-Paced)
 
-Every week follows an identical 7-stage engineering workflow. Because this is a self-paced simulated cohort, "Monday" through "Sunday" represent **stages of mastery within a week** rather than rigid calendar dates:
+Because this is a self-paced simulated cohort, "Monday" through "Sunday" represent **seven progressive stages of mastery within each week** rather than rigid calendar dates:
 
-1. **Monday — Mentor Briefing & Ticket Assignment**:
-   - Meet with **Alex Morgan** to review NovaPay's current engineering challenge.
-   - Read the simulated **Peer Engineering Discussion** between Alex, Sarah, Daniel, and Maya.
-   - Receive your weekly **Engineering Ticket (`NP-10X`)** with business requirements, constraints, and acceptance criteria.
-2. **Tuesday — Technical Lectures & Under-the-Hood Study**:
-   - Dive into the core technical module's `README.md` with Alex's study guide.
-   - Trace the internal Envoy xDS compilation, packet flow diagrams, and configuration trade-offs.
-3. **Wednesday — Guided Hands-On Labs**:
-   - Run the pre-flight version check (`Istio 1.32.0`, `K8s 1.36+`, `Gateway API v1.6.1`).
-   - Execute the core module's `LAB.md` step-by-step on your cluster.
-   - Validate Alex's **Internal Verification Checkpoints** using `istioctl proxy-config` and Envoy Admin `:15000`.
-4. **Thursday — Independent Engineering Assignment**:
-   - Solve a realistic NovaPay engineering assignment *without* step-by-step hand-holding.
-   - Verify your implementation against automated acceptance criteria before expanding the collapsible **Reference Solution & Code Review**.
-5. **Friday — Production Incident Simulation (`INC-0X`)**:
-   - Respond to a PagerDuty alert from **Sarah Chen**.
-   - Apply the broken state (or inspect the provided diagnostic evidence), isolate the root cause using `istioctl analyze`, Envoy response flags, and xDS dumps, remediate the outage, and write an RCA using [`INCIDENT_POSTMORTEM_TEMPLATE.md`](./fellowship/templates/INCIDENT_POSTMORTEM_TEMPLATE.md).
-6. **Saturday — Architecture Review & Mentor Office Hours**:
-   - Defend your week's architecture against pointed technical challenges from Alex, Sarah, Daniel, and Maya.
-   - Review Alex's Office Hours Q&A covering subtle production edge cases.
-7. **Sunday — Weekly Assessment & Retrospective**:
-   - Complete the 5-question technical & troubleshooting assessment.
-   - Record your completed deliverables and competency sign-offs in [`PROGRESSION_DASHBOARD.md`](./PROGRESSION_DASHBOARD.md).
-
----
-
-## 5. Engineering Templates & Portfolio Artifacts
-
-Use the templates in [`fellowship/templates/`](./fellowship/templates/) to document your work as you progress through the 10 weeks:
-- **[`ENGINEERING_TICKET_TEMPLATE.md`](./fellowship/templates/ENGINEERING_TICKET_TEMPLATE.md)** — For documenting your Thursday Independent Assignment deliverables (`NP-101` to `NP-110`).
-- **[`INCIDENT_POSTMORTEM_TEMPLATE.md`](./fellowship/templates/INCIDENT_POSTMORTEM_TEMPLATE.md)** — Blameless 5-Whys Root Cause Analysis template for Friday Incident Drills (`INC-01` to `INC-10`).
-- **[`ARCHITECTURE_REVIEW_RFC_TEMPLATE.md`](./fellowship/templates/ARCHITECTURE_REVIEW_RFC_TEMPLATE.md)** — RFC template for Saturday Architecture Defense sign-offs.
-- **[`WEEKLY_ASSESSMENT_TEMPLATE.md`](./fellowship/templates/WEEKLY_ASSESSMENT_TEMPLATE.md)** — Self-assessment and retrospective log for Sunday reviews.
-
+- **Monday — Mentor Briefing & Ticket Assignment**: Meet with Alex Morgan, read the peer engineering debate (`#platform-mesh-arch`), and receive your weekly ticket (`NP-10X`).
+- **Tuesday — Modular Technical Lessons**: Work through the focused, 20–30 minute lessons in `0X-.../lessons/` and review the Module Overview Hub (`0X-.../README.md`).
+- **Wednesday — Guided Hands-On Lab**: Run pre-flight verification, execute `0X-.../LAB.md`, predict system behavior before running commands, and verify Alex's xDS checkpoints.
+- **Thursday — Independent Engineering Assignment**: Solve ticket `NP-10X` independently on your cluster; consult Alex's progressive hint if stuck before opening the reference solution.
+- **Friday — Production Incident Simulation (`INC-0X`)**: Respond to Sarah Chen's PagerDuty alert, reproduce the outage, isolate the Envoy response flag and xDS root cause, and write a blameless postmortem.
+- **Saturday — Architecture Review & Mentor Office Hours**: Defend your implementation against challenges from Alex, Sarah, Daniel, and Maya, and study Alex's Office Hours Q&A.
+- **Sunday — Weekly Assessment & Retrospective**: Complete the 5-question engineering assessment and update [`PROGRESSION_DASHBOARD.md`](./PROGRESSION_DASHBOARD.md).

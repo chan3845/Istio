@@ -1,8 +1,18 @@
 # Module 05 Lab: Fault Injection, Timeouts/Retries, Circuit Breaking & Outlier Ejection
 
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 06: Resilience Engineering & Chaos Testing](../fellowship/week-06-resilience-and-chaos-engineering/WEEK.md) > [Module 05 Hub](./README.md) > **Guided Lab 05**  
+> **Lessons Covered**: [Lesson 05.1](./lessons/01-timeouts-retries-and-retry-storms.md) · [Lesson 05.2](./lessons/02-circuit-breaking-and-outlier-detection.md) · [Lesson 05.3](./lessons/03-chaos-fault-injection-and-locality-failover.md)
+
+> [!TIP]
+> **Execution Verification Status (November 2026 Baseline)**
+> - **Verified Environment**: Istio `1.32.0` (`istiod`) | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`.
+> - **Manifests Directory**: All manifests in [`./manifests/`](./manifests/) (`fault-injection-delay-abort.yaml`, `timeouts-and-retries.yaml`, `fortio-client.yaml`, `circuit-breaker-connection-pool.yaml`, `outlier-detection-ejection.yaml`) are validated for Istio `1.32.0` and ready to apply using relative paths.
+
+---
+
 ## Learning Objectives
 By the end of this hands-on lab, you will be able to:
-1. Inject L7 latency (`fixedDelay`) and HTTP errors (`abort`) into `payment-service` using a `VirtualService`.
+1. Inject L7 latency (`fixedDelay` $\rightarrow$ `DI`) and HTTP errors (`abort` $\rightarrow$ `FI`) into `payment-service` using a `VirtualService`.
 2. Enforce `timeout` and `retries` (`perTryTimeout`, `attempts`, `retryOn`) between `order-service` and `payment-service`, and verify `UT` (Upstream Request Timeout) flags and `upstream_rq_retry` counters in Envoy.
 3. Configure a `DestinationRule` `connectionPool` circuit breaker, overload `payment-service` using `fortio`, and inspect `503 UO` (`UpstreamOverflow`) responses and `upstream_rq_pending_overflow` metrics.
 4. Trigger passive health check pod ejection (`outlierDetection`) when `payment-service-v2` returns `500` errors, and inspect `/clusters` health flags (`/failed_outlier_check`) directly in Envoy's admin interface (`localhost:15000`).
@@ -11,10 +21,10 @@ By the end of this hands-on lab, you will be able to:
 
 ## Prerequisites & Version Baseline Pre-Flight Verification
 
-> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
-> **Fellowship Reference**: **[Week 06: Resilience Engineering & Chaos Testing](../fellowship/week-06-resilience-engineering-and-chaos/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`  
+> **Fellowship Reference**: **[Week 06: Resilience Engineering & Chaos Testing](../fellowship/week-06-resilience-and-chaos-engineering/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
 
-Ensure your Kubernetes `v1.36+` cluster has Istio `1.32.0` installed and the **OrderFlow** base workloads deployed in the `orderflow` namespace with sidecar injection enabled:
+Ensure your Kubernetes `v1.36+` cluster has Istio `1.32.0` installed and the **OrderFlow** base workloads deployed in the `orderflow` namespace with sidecar injection enabled, working from the `/home/chan/Documents/Istio` repository root:
 
 ```bash
 istioctl version
@@ -33,9 +43,9 @@ payment-service-v1-7c9f8b6-q7v2l     2/2     Running   0          15m
 payment-service-v2-5b6d9f4-z3k8h     2/2     Running   0          15m
 ```
 
-Clear any leftover routing rules from previous labs:
+Clear any leftover routing or authorization rules from previous labs:
 ```bash
-kubectl delete virtualservice,destinationrule --all -n orderflow
+kubectl delete virtualservice,destinationrule,authorizationpolicy,requestauthentication,peerauthentication --all -n orderflow
 ```
 
 ---
@@ -50,7 +60,7 @@ flowchart LR
         OS["order-service<br/>(Outbound Envoy Proxy)"]
         
         subgraph EnvoyResilience["Envoy Outbound Filter & Cluster Chain"]
-            FI["1. Fault Filter<br/>(delay: 3s / abort: 500)"]
+            FI["1. Fault Filter<br/>(delay: 3s DI / abort: 500 FI)"]
             RT["2. Router Filter<br/>(timeout: 3.5s, perTryTimeout: 1s, attempts: 3)"]
             CB["3. Connection Pool<br/>(maxConnections: 1, Pending: 1 -> 503 UO)"]
             OD["4. Outlier Detection<br/>(consecutive5xxErrors: 2 -> Eject v2)"]
@@ -63,8 +73,8 @@ flowchart LR
     TB --> OS
     OS --> FI --> RT --> CB --> OD
     FL --> CB
-    OD -->|Healthy Traffic| PS1
-    OD -.->|Ejected: /failed_outlier_check| PS2
+    OD -->|"Healthy Traffic"| PS1
+    OD -.->|"Ejected: /failed_outlier_check"| PS2
 ```
 
 ---
@@ -72,10 +82,14 @@ flowchart LR
 ## Part 1: Fault Injection, Timeouts & Retries
 
 ### Step 1.1: Inject a 3-Second Latency & Header-Based Abort Fault
+
+> 🤔 **Predict Before You Execute**  
+> Inspect [`manifests/fault-injection-delay-abort.yaml`](./manifests/fault-injection-delay-abort.yaml). When you send a request with `-H "x-Chaos-Mode: abort"`, does the request ever reach the `payment-service` pod over the network, or is it terminated inside the caller's outbound Envoy `envoy.filters.http.fault` filter? How long will the response take?
+
 Apply `fault-injection-delay-abort.yaml`, which injects a `3s` fixed delay on 50% of requests to `payment-service` and an immediate `HTTP 500` abort when the header `x-Chaos-Mode: abort` is present:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/05-resilience-and-fault-injection/manifests/fault-injection-delay-abort.yaml
+kubectl apply -f 05-resilience-and-fault-injection/manifests/fault-injection-delay-abort.yaml
 ```
 
 Test the abort fault from `client-toolbox`:
@@ -88,12 +102,12 @@ kubectl exec -n orderflow "$TOOLBOX_POD" -c curl -- \
   http://payment-service:8080/
 ```
 
-Expected output:
+Expected output (`~4ms` total time because the caller's local Envoy proxy aborts the request with `FI` before sending it over the network!):
 ```text
 HTTP Status: 500 | Time: 0.004120s
 ```
 
-Now send 4 requests without the header to observe the 50% `3s` fixed delay:
+Now send 4 requests without the header to observe the 50% `3s` fixed delay (`DI`):
 ```bash
 for i in 1 2 3 4; do
   kubectl exec -n orderflow "$TOOLBOX_POD" -c curl -- \
@@ -102,7 +116,7 @@ for i in 1 2 3 4; do
 done
 ```
 
-Expected output (roughly half take ~3.0s, half take ~0.005s):
+Expected output (roughly half take `~3.0s`, half take `~0.005s`):
 ```text
 Req 1 -> HTTP Status: 200 | Time: 3.005412s
 Req 2 -> HTTP Status: 200 | Time: 0.004910s
@@ -111,22 +125,18 @@ Req 4 -> HTTP Status: 200 | Time: 0.003995s
 ```
 
 ### Step 1.2: Simulate an Upstream Service Delay & Configure Timeouts + Retries
-Remember that `VirtualService` `fault.delay` is injected in the caller's outbound proxy. To test how `order-service` (or `client-toolbox`) uses `perTryTimeout: 1s` and `attempts: 3` against a genuinely slow upstream pod (or intermittent pod latency), let's configure `payment-service-v2` to sleep for `3s` on its responses (or use `fake-service`'s built-in `TIMING_50_PERCENTILE=3000ms` on `payment-service-v2`) while `payment-service-v1` responds in `5ms`.
+Remember from [Lesson 05.3](./lessons/03-chaos-fault-injection-and-locality-failover.md) that `VirtualService` `fault.delay` is injected in the caller's outbound proxy before the `router` filter. To test how `order-service` uses `perTryTimeout: 1s` and `attempts: 3` against a genuinely slow upstream pod (`payment-service-v2`) while `payment-service-v1` responds in `5ms`, let's configure `payment-service-v2` to take `3000ms` (`3s`):
 
-Let's patch `payment-service-v2` so it simulates a slow database taking `3s`:
 ```bash
 kubectl set env deployment/payment-service-v2 -n orderflow TIMING_50_PERCENTILE=3000ms TIMING_90_PERCENTILE=3000ms
 kubectl rollout status deployment/payment-service-v2 -n orderflow
 ```
 
-Now apply `timeouts-and-retries.yaml` and route across all `payment-service` pods (both `v1` fast and `v2` slow `3s`) with `timeout: 3.5s`, `attempts: 3`, and `perTryTimeout: 1s`:
+Now delete the fault injection `VirtualService`, apply [`manifests/timeouts-and-retries.yaml`](./manifests/timeouts-and-retries.yaml) (`timeout: 3.5s`, `attempts: 3`, `perTryTimeout: 1s`), and let it balance across all `payment-service` pods (`v1` fast `5ms`, `v2` slow `3s`):
+
 ```bash
 kubectl delete virtualservice payment-service-fault -n orderflow
-kubectl apply -f /home/chan/Documents/Istio/05-resilience-and-fault-injection/manifests/timeouts-and-retries.yaml
-```
-
-Let's also update the route in `payment-service-resilience` so it balances across both `v1` and `v2` (by removing `subset: v1` temporarily or testing against the service):
-```bash
+kubectl apply -f 05-resilience-and-fault-injection/manifests/timeouts-and-retries.yaml
 kubectl patch virtualservice payment-service-resilience -n orderflow --type='json' \
   -p='[{"op": "remove", "path": "/spec/http/0/route/0/destination/subset"}]'
 ```
@@ -137,17 +147,13 @@ ORDER_POD=$(kubectl get pod -n orderflow -l app=order-service,version=v1 -o json
 istioctl proxy-config routes "$ORDER_POD" -n orderflow --name 8080 -o json
 ```
 
-Expected output excerpt:
+Expected output excerpt (notice `PreviousHostsPredicate` automatically injected by `istiod`!):
 ```json
 {
   "name": "8080",
   "virtualHosts": [
     {
       "name": "payment-service.orderflow.svc.cluster.local:8080",
-      "domains": [
-        "payment-service.orderflow.svc.cluster.local",
-        "payment-service"
-      ],
       "routes": [
         {
           "match": { "prefix": "/" },
@@ -177,7 +183,11 @@ Expected output excerpt:
 ```
 
 ### Step 1.3: Verify `perTryTimeout` (`UT`) and `upstream_rq_retry` Stats
-Send 10 requests from `order-service` (via `frontend`) and watch how Envoy times out attempts that land on `payment-service-v2` at `1.0s` (`perTryTimeout`) and immediately retries on `payment-service-v1`:
+
+> 🤔 **Predict Before You Execute**  
+> When `order-service` calls `payment-service` and Attempt 1 lands on `payment-service-v2` (which takes `3.0s`), what happens at `t = 1.0s` (`perTryTimeout`), which pod will Attempt 2 pick, and what will the total response time and HTTP status code be?
+
+Send 10 requests through `order-service` and watch how Envoy cancels attempts that hit `payment-service-v2` at `1.0s` (`perTryTimeout`) and immediately retries on `payment-service-v1`:
 
 ```bash
 for i in $(seq 1 10); do
@@ -187,7 +197,7 @@ for i in $(seq 1 10); do
 done
 ```
 
-Expected output (requests that initially hit `v2` timeout at `1.0s` and succeed on retry to `v1` at `~1.03s`, never waiting the full `3.0s` and never returning `504`!):
+Expected output (requests that initially hit `v2` time out at `1.0s` and succeed on retry to `v1` at `~1.03s`, never waiting the full `3.0s` and never returning `504`!):
 ```text
 Req 1 -> Status: 200 | Total Time: 0.008214s
 Req 2 -> Status: 200 | Total Time: 1.034192s
@@ -210,9 +220,8 @@ cluster.outbound|8080||payment-service.orderflow.svc.cluster.local.upstream_rq_r
 cluster.outbound|8080||payment-service.orderflow.svc.cluster.local.upstream_rq_retry_success: 5
 ```
 
-Check `payment-service-v2`'s Envoy access logs to see the `UT` (`UpstreamRequestTimeout` / downstream cancelled stream) or check `order-service-v1` when both pods are slow:
+Restore `payment-service-v2` latency to normal before Part 2:
 ```bash
-# Restore payment-service-v2 latency to normal before Part 2
 kubectl set env deployment/payment-service-v2 -n orderflow TIMING_50_PERCENTILE- TIMING_90_PERCENTILE-
 kubectl rollout status deployment/payment-service-v2 -n orderflow
 ```
@@ -222,12 +231,12 @@ kubectl rollout status deployment/payment-service-v2 -n orderflow
 ## Part 2: Circuit Breaking with `connectionPool` and `fortio`
 
 ### Step 2.1: Deploy `fortio` and Configure a Strict Connection Pool
-Deploy the `fortio-load` load generator pod and apply `circuit-breaker-connection-pool.yaml`, which restricts `payment-service` to `maxConnections: 1` and `http1MaxPendingRequests: 1`:
+Deploy the `fortio-load` load generator pod and apply [`manifests/circuit-breaker-connection-pool.yaml`](./manifests/circuit-breaker-connection-pool.yaml), which restricts `payment-service` to `maxConnections: 1` and `http1MaxPendingRequests: 1`:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/05-resilience-and-fault-injection/manifests/fortio-client.yaml
-kubectl delete virtualservice payment-service-resilience -n orderflow
-kubectl apply -f /home/chan/Documents/Istio/05-resilience-and-fault-injection/manifests/circuit-breaker-connection-pool.yaml
+kubectl apply -f 05-resilience-and-fault-injection/manifests/fortio-client.yaml
+kubectl delete virtualservice payment-service-resilience -n orderflow --ignore-not-found
+kubectl apply -f 05-resilience-and-fault-injection/manifests/circuit-breaker-connection-pool.yaml
 kubectl rollout status deployment/fortio-load -n orderflow
 ```
 
@@ -253,7 +262,7 @@ Expected output:
 ```
 
 ### Step 2.2: Trip the Circuit Breaker with Concurrent Connections
-First, send a single baseline request with `fortio` (`-c 1` concurrency, `-n 20` requests):
+First, send a single baseline request stream with `fortio` (`-c 1` concurrency, `-n 20` requests):
 ```bash
 kubectl exec -n orderflow "$FORTIO_POD" -c fortio -- \
   /usr/bin/fortio load -c 1 -qps 0 -n 20 -loglevel Warning http://payment-service:8080/
@@ -265,7 +274,10 @@ Code 200 : 20 (100.0 %)
 All done 20 calls (plus 0 warmup) 2.412 ms avg, 414.5 qps
 ```
 
-Now increase concurrency to **4 simultaneous connections (`-c 4`)** for **100 requests (`-n 100`)**. Because `maxConnections: 1` and `http1MaxPendingRequests: 1`, at most 1 request is active and 1 is queued; the other 2 concurrent requests trip the circuit breaker immediately with **`Code 503`** (`503 UO`):
+> 🤔 **Predict Before You Execute**  
+> Now we will increase `fortio` concurrency to **4 simultaneous connections (`-c 4`)** while `maxConnections: 1` and `http1MaxPendingRequests: 1` are active. At any given instant, how many requests can be active + queued, and what HTTP status code and Envoy response flag will the excess concurrent requests receive?
+
+Run `fortio` with `-c 4` for `100` requests (`-n 100`):
 
 ```bash
 kubectl exec -n orderflow "$FORTIO_POD" -c fortio -- \
@@ -316,16 +328,16 @@ kubectl set env deployment/payment-service-v2 -n orderflow ERROR_RATE=1.0 ERROR_
 kubectl rollout status deployment/payment-service-v2 -n orderflow
 ```
 
-Clean up the Part 2 connection pool rule and apply `outlier-detection-ejection.yaml`, which configures:
+Clean up the Part 2 connection pool rule and apply [`manifests/outlier-detection-ejection.yaml`](./manifests/outlier-detection-ejection.yaml), which configures:
 - `consecutive5xxErrors: 2`
 - `interval: 5s`
 - `baseEjectionTime: 30s`
 - `maxEjectionPercent: 100`
 
 ```bash
-kubectl delete destinationrule payment-service-circuit-breaker -n orderflow
-kubectl delete virtualservice payment-service-cb-route -n orderflow
-kubectl apply -f /home/chan/Documents/Istio/05-resilience-and-fault-injection/manifests/outlier-detection-ejection.yaml
+kubectl delete destinationrule payment-service-circuit-breaker -n orderflow --ignore-not-found
+kubectl delete virtualservice payment-service-cb-route -n orderflow --ignore-not-found
+kubectl apply -f 05-resilience-and-fault-injection/manifests/outlier-detection-ejection.yaml
 ```
 
 ### Step 3.2: Trigger Ejection and Inspect `/clusters` Health Flags
@@ -341,7 +353,10 @@ payment-service-v1-7c9f8b6-q7v2l     2/2     Running   10.244.0.14   istio-worke
 payment-service-v2-6d8c9f4-r2m9p     2/2     Running   10.244.0.22   istio-worker  v2
 ```
 
-Now send 10 sequential requests from `client-toolbox` to `http://payment-service:8080/`:
+> 🤔 **Predict Before You Execute**  
+> We have 2 endpoints (`v1` returning `200`, `v2` returning `500`) and `consecutive5xxErrors: 2`. When we send 10 sequential requests from `client-toolbox` to `payment-service:8080`, how many `HTTP 500` responses will you see before `v2` is ejected and all remaining requests return `HTTP 200`?
+
+Send 10 sequential requests from `client-toolbox` to `http://payment-service:8080/`:
 ```bash
 for i in $(seq 1 10); do
   kubectl exec -n orderflow "$TOOLBOX_POD" -c curl -- \
@@ -393,34 +408,76 @@ cluster.outbound|8080||payment-service.orderflow.svc.cluster.local.outlier_detec
 cluster.outbound|8080||payment-service.orderflow.svc.cluster.local.outlier_detection.ejections_total: 1
 ```
 
-### Step 3.3: Clean Up `payment-service-v2` Error Injection
-Restore `payment-service-v2` to healthy operation before proceeding to Module 06:
+---
+
+## Troubleshooting Exercises (With Progressive Hints)
+
+### Exercise 1: Why Didn't My Retries Trigger on `HTTP 500`?
+**Scenario**: You configured `retries.attempts: 3`, `perTryTimeout: 1s` in a `VirtualService` for `payment-service`, and also added `fault.abort.httpStatus: 500` (`100%`) in that *same* `VirtualService` route. When `order-service` calls `payment-service`, it immediately returns `500` with `0` retries (`upstream_rq_retry: 0`). Why?
+
+<details>
+<summary>💡 Hint 1: Which Envoy proxy evaluates the `VirtualService` for `payment-service`?</summary>
+
+When `order-service` calls `payment-service`, the `VirtualService` for host `payment-service` is evaluated inside **`order-service`'s own outbound Envoy sidecar (`:15001`)**.
+</details>
+
+<details>
+<summary>💡 Hint 2: Check the order of HTTP filters inside Envoy's HTTP Connection Manager</summary>
+
+Inside Envoy's HCM filter pipeline, which filter runs first: `envoy.filters.http.fault` or `envoy.filters.http.router`? And which of those two filters is responsible for executing `retryPolicy`?
+</details>
+
+<details>
+<summary>✅ Full Solution & Root Cause Analysis</summary>
+
+- **Root Cause**: Envoy evaluates HTTP filters sequentially: **`envoy.filters.http.fault` runs BEFORE `envoy.filters.http.router`**. When `fault.abort` triggers inside the caller's outbound `fault` filter, Envoy immediately aborts the request and returns `500` (`FI`) before the request ever reaches the `router` filter where `retryPolicy` lives!
+- **Fix**: To test caller retries against `500` responses, either inject the error at the **upstream workload** (as we did with `payment-service-v2`'s `ERROR_RATE=1.0`), or test from one hop further downstream (`frontend` $\rightarrow$ `order-service` retries when `order-service` $\rightarrow$ `payment-service` has a fault).
+</details>
+
+---
+
+### Exercise 2: Why Did `outlierDetection` Refuse to Eject a Failing Pod?
+**Scenario**: You have 2 replicas of `payment-service` (`v1` healthy, `v2` returning 100% `500` errors). You configured `outlierDetection: { consecutive5xxErrors: 3, maxEjectionPercent: 40 }`. Even after 100 errors, `v2` is never ejected (`ejections_enforced_total: 0`). Why?
+
+<details>
+<summary>💡 Hint 1: Calculate the percentage of the pool represented by 1 pod</summary>
+
+In a 2-pod cluster (`v1` and `v2`), what percentage of the total endpoints does 1 pod represent?
+</details>
+
+<details>
+<summary>💡 Hint 2: Compare that percentage against `maxEjectionPercent` and `minHealthPercent`</summary>
+
+1 pod out of 2 is **$50\%$** of the pool. If `maxEjectionPercent: 40`, is Envoy allowed to eject $50\%$ of the endpoints?
+</details>
+
+<details>
+<summary>✅ Full Solution & Root Cause Analysis</summary>
+
+- **Root Cause**: Ejecting 1 out of 2 pods removes `50%` of the pool, which exceeds `maxEjectionPercent: 40`. Envoy detects the consecutive `5xx` errors (`ejections_detected_consecutive_5xx` increments) but **refuses to enforce** the ejection (`ejections_enforced_total: 0`).
+- **Fix**: In small replica sets (2–3 pods), set `maxEjectionPercent: 50` (or `100` in lab environments) so Envoy is permitted to eject at least 1 replica (`50%` of the pool).
+</details>
+
+---
+
+## Cleanup Procedure
+
+Restore `payment-service-v2` to healthy operation and remove the Module 05 test manifests before proceeding to Module 06:
+
 ```bash
-kubectl set env deployment/payment-service-v2 -n orderflow ERROR_RATE- ERROR_CODE- ERROR_TYPE-
+kubectl set env deployment/payment-service-v2 -n orderflow ERROR_RATE- ERROR_CODE- ERROR_TYPE- TIMING_50_PERCENTILE- TIMING_90_PERCENTILE-
 kubectl rollout status deployment/payment-service-v2 -n orderflow
-kubectl delete virtualservice,destinationrule --all -n orderflow
+kubectl delete -f 05-resilience-and-fault-injection/manifests/outlier-detection-ejection.yaml --ignore-not-found
+kubectl delete -f 05-resilience-and-fault-injection/manifests/circuit-breaker-connection-pool.yaml --ignore-not-found
+kubectl delete -f 05-resilience-and-fault-injection/manifests/timeouts-and-retries.yaml --ignore-not-found
+kubectl delete -f 05-resilience-and-fault-injection/manifests/fault-injection-delay-abort.yaml --ignore-not-found
+kubectl delete -f 05-resilience-and-fault-injection/manifests/fortio-client.yaml --ignore-not-found
 ```
 
 ---
 
-## What Happens Internally
+## Production Considerations for NovaPay Engineers
 
-1. **xDS Translation (`istiod` $\rightarrow$ Envoy)**:
-   - When you applied `timeouts-and-retries.yaml`, `istiod` generated an RDS (Route Discovery Service) update containing a `RouteAction` with `timeout: 3.5s` and `retryPolicy`. Crucially, Istio automatically adds the `envoy.retry_host_predicates.previous_hosts` predicate so retries avoid picking the exact same pod IP that just failed or timed out!
-   - When you applied `circuit-breaker-connection-pool.yaml` and `outlier-detection-ejection.yaml`, `istiod` pushed a CDS (Cluster Discovery Service) update to every sidecar in the namespace with `circuitBreakers.thresholds` and `outlierDetection` attached to `outbound|8080||payment-service.orderflow.svc.cluster.local`.
-2. **Per-Sidecar State**:
-   - Both `connectionPool` counters and `outlierDetection` ejection states are **local to each caller sidecar instance** (they are not shared across pods via a central database). If `order-service` has 3 replicas, each replica's `istio-proxy` independently tracks `consecutive5xxErrors` and ejects unhealthy upstream IPs based on the traffic it observes.
-
----
-
-## Troubleshooting Exercises
-
-### Exercise 1: Why Didn't My Retries Trigger on `HTTP 500`?
-**Scenario**: You configured `retries.attempts: 3`, `perTryTimeout: 1s` in a `VirtualService`, and also added `fault.abort.httpStatus: 500` (`100%`) in that *same* `VirtualService` route. When you call the service, it immediately returns `500` with `0` retries (`upstream_rq_retry: 0`). Why?
-- **Root Cause**: Envoy evaluates HTTP filters in order: `envoy.filters.http.fault` runs **before** `envoy.filters.http.router`. When `fault.abort` triggers in the caller's outbound proxy, the request never reaches the `router` filter where retry logic lives!
-- **Fix**: To test caller retries against `500` responses, inject the error at the **upstream workload** (e.g., via `fake-service`'s `ERROR_RATE=1.0` or an inbound `EnvoyFilter` on the server pod) rather than aborting inside the caller's outbound `fault` filter.
-
-### Exercise 2: Why Did `outlierDetection` Refuse to Eject a Failing Pod?
-**Scenario**: You have 2 replicas of `payment-service` (`v1` healthy, `v2` returning 100% `500` errors). You configured `outlierDetection: { consecutive5xxErrors: 3 }` without setting `maxEjectionPercent`, or you have a custom `maxEjectionPercent: 40` and 2 pods. Even after 100 errors, `v2` is never ejected (`ejections_enforced_total: 0`, even though `ejections_detected_consecutive_5xx` increments). Why?
-- **Root Cause**: Check `minHealthPercent` and `maxEjectionPercent`. If `maxEjectionPercent` or `minHealthPercent` prevents ejecting 1 out of 2 pods (50% of the pool), Envoy increments `ejections_detected_consecutive_5xx` (legacy metric) but **does not enforce** the ejection (`ejections_enforced_total: 0`), or enters Panic Mode and continues routing to all endpoints!
-- **Fix**: In small replica sets (2–3 pods), explicitly set `maxEjectionPercent: 50` (or `100`) and verify `minHealthPercent` so Envoy is permitted to eject at least 50% of the pool.
+1. **Never Leave Istio HTTP Timeouts at Default (`0s`)**: Audit every production `VirtualService` / `HTTPRoute` to ensure explicit timeouts are set and obey the **Timeout Math Rule** across every synchronous call hop.
+2. **Size `connectionPool` with Little's Law, Not Lab Values (`1`)**: Use `maxConnections: 1` only in labs to force `503 UO`. In production, size `http2MaxRequests` and `maxConnections` to $1.5\times \text{Peak RPS} \times \text{P99 Latency}$, and always set `maxRetries` (`3–5`) to prevent cluster-wide retry storms.
+3. **Alert on Envoy Resilience Response Flags**: Create dedicated Prometheus/Grafana alert rules grouping `istio_requests_total` by `response_flags` (`UO`, `UT`, `UF`, `UH`, `URX`) so on-call SREs can immediately distinguish circuit breaker trips (`UO`) from upstream timeouts (`UT`) or dead pods (`UF`/`UH`).

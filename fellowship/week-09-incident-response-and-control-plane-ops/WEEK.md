@@ -1,3 +1,5 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-08-observability-and-golden-signals/WEEK.md) · **Week 09 of 10** · [Next Week ->](../week-10-capstone-and-graduation-defense/WEEK.md)
+
 # Week 09: Incident Response, Deep xDS Debugging & Zero-Downtime Control Plane Upgrades
 
 **Phase 4: Observability, Operations & Capstone** | **Schedule**: Week 09 of 10  
@@ -6,6 +8,13 @@
 - 📖 **Technical Lecture 1**: [Module 08 — Debugging, Troubleshooting & Production Operations (`README.md`)](../../08-debugging-and-production-operations/README.md)
 - 📖 **Technical Lecture 2**: [Module 09 — Production Checklists & Architectural Reference (`README.md`)](../../09-production-checklists-and-reference/README.md)
 - 🧪 **Guided Hands-On Lab**: [Module 08 Lab — The 5-Scenario Diagnostic Gauntlet & Revision Canary Upgrade (`LAB.md`)](../../08-debugging-and-production-operations/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 4 — Observability, Operations & Capstone (Week 09 of 10)
+> - **Prerequisites**: Completed Weeks 01–08 (xDS internals, traffic routing, mTLS/RBAC, resilience, progressive delivery, and `Telemetry`)
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: Resolution of the 5-Scenario Game-Day Troubleshooting Gauntlet, zero-downtime `1-31-0 -> 1-32-0` revision-based canary control-plane upgrade, and Day-2 pod lifecycle hardening (`NP-109`)
 
 ---
 
@@ -73,10 +82,13 @@ Before final production freeze, every NovaPay Platform Engineer must pass the 5-
 
 ## 📅 Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### 📚 Assigned Core Reading
-Read both Module 08 and Module 09 technical lectures before proceeding:
-1. 👉 **[Module 08: Debugging, Troubleshooting & Production Operations (`../../08-debugging-and-production-operations/README.md`)](../../08-debugging-and-production-operations/README.md)**
-2. 👉 **[Module 09: Production Checklists & Architectural Reference (`../../09-production-checklists-and-reference/README.md`)](../../09-production-checklists-and-reference/README.md)**
+### 📚 Assigned Core Reading & Modular Lessons
+Study the complete operational references and progressive lessons in Modules 08 and 09 before proceeding:
+- 👉 **Core Module 08 Overview**: **[Module 08: Debugging, Troubleshooting & Production Operations (`../../08-debugging-and-production-operations/README.md`)](../../08-debugging-and-production-operations/README.md)**
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 08.1: The 5-Step Debugging Methodology & Envoy Response Flags](../../08-debugging-and-production-operations/lessons/01-systematic-debugging-and-response-flags.md)
+  2. [Lesson 08.2: Production Operational Pitfalls & Canary Control Plane Upgrades](../../08-debugging-and-production-operations/lessons/02-production-pitfalls-and-canary-control-plane-upgrades.md)
+- 👉 **Core Module 09 Reference**: **[Module 09: Production Readiness Checklists & Quick Reference (`../../09-production-checklists-and-reference/README.md`)](../../09-production-checklists-and-reference/README.md)**
 
 ### 📝 Alex Morgan's Guided Study Notes
 
@@ -191,6 +203,16 @@ kubectl get job nightly-ledger-reconciliation -n novapay
 ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **`Sidecar` Egress & Outbound Lockdown**: In `Sidecar/novapay-default-sidecar`, set `spec.outboundTrafficPolicy.mode: REGISTRY_ONLY` and `spec.egress[0].hosts: ["./*", "novapay-pci/*", "istio-system/*"]`.
+> 2. **Graceful Pod Drain Timing**: In `Deployment/payment-service-v1`, set `proxy.istio.io/config` with `holdApplicationUntilProxyStarts: true`, `terminationDrainDuration: 20s`, and `proxyMetadata.EXIT_ON_ZERO_ACTIVE_CONNECTIONS: "true"`. Make sure the pod's `terminationGracePeriodSeconds` (`35`) is strictly larger than `20s`, and add a `lifecycle.preStop` `sleep 5` hook on the app container so EDS endpoint removal propagates before connections close!
+> 3. **Clean Batch `Job` Exit**: In `Job/nightly-ledger-reconciliation`, add `trap 'curl -sf -X POST http://127.0.0.1:15020/quitquitquit' EXIT` to the shell script (or rely on K8s 1.36+ native sidecar lifecycle) so `pilot-agent` shuts down `istio-proxy` as soon as the batch job finishes.
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -350,6 +372,16 @@ spec:
    ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. **Dual Injection Labels (`IST0135`)**: `Namespace/novapay` has **both** `istio-injection: enabled` and `istio.io/rev: 1-32-0`. Remove the legacy label (`kubectl label ns novapay istio-injection-`).
+> 2. **Orphaned Proxies After Control Plane Removal**: Relabeling a namespace does **not** restart existing pods! You must run `kubectl rollout restart deployment -n novapay` so pods re-inject with the `1-32-0` sidecar and connect to `istiod-1-32-0`.
+> 3. **Unrecognized Port Name (`IST0118`)**: Rename `custom-orders-port` on `Service/order-service` to `http-orders` and set `appProtocol: http`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>

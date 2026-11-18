@@ -1,21 +1,31 @@
-# Module 04 Lab: SPIFFE Certificates, `STRICT` mTLS, Zero-Trust `AuthorizationPolicy`, JWT Auth & Debugging `AND` vs `OR` Rules
+# Module 04 Lab: SPIFFE Certificates, `STRICT` mTLS, Zero-Trust `AuthorizationPolicy`, JWT Auth & Debugging `AND` vs. `OR` Rules
+
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 05: Zero-Trust Security Architecture](../fellowship/week-05-zero-trust-security-architecture/WEEK.md) > [Module 04 Hub](./README.md) > **Guided Lab 04**  
+> **Lessons Covered**: [Lesson 04.1](./lessons/01-spiffe-identity-and-sds-lifecycle.md) · [Lesson 04.2](./lessons/02-peer-authentication-and-mtls-migration.md) · [Lesson 04.3](./lessons/03-jwt-authn-and-authorization-policy.md)
+
+> [!TIP]
+> **Execution Verification Status (November 2026 Baseline)**
+> - **Verified Environment**: Istio `1.32.0` (`istiod`) | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`.
+> - **Offline / Air-Gapped Ready**: [`manifests/jwt-request-authn-and-authz.yaml`](./manifests/jwt-request-authn-and-authz.yaml) embeds inline JWKS public keys and a sample JWT `ConfigMap` (`sample-jwt-tokens`), so Step 4 works 100% deterministically inside sandboxed clusters without requiring external internet access.
+
+---
 
 ## Learning Objectives
 By the end of this lab, you will be able to:
 1. Extract and inspect in-memory X.509 workload certificates from Envoy via SDS and verify the SPIFFE ID (`spiffe://cluster.local/ns/orderflow/sa/...`) using `openssl`.
-2. Demonstrate the difference between `PERMISSIVE` and `STRICT` mTLS by testing calls from an uninjected legacy pod vs. a mesh-injected pod.
+2. Demonstrate the difference between `PERMISSIVE` and `STRICT` mTLS by testing calls from an uninjected legacy pod vs. a mesh-injected pod, and observe the removal of the `raw_buffer` filter chain on `:15006`.
 3. Lock down the entire `orderflow` namespace with a Zero-Trust `allow-nothing` baseline `AuthorizationPolicy` and explicitly unlock the `OrderFlow` microservice call graph using SPIFFE `principals`.
-4. Configure end-user JWT verification with `RequestAuthentication` and enforce claim-based access control (`request.auth.claims[role]: ["admin"]`) with `AuthorizationPolicy`.
-5. Diagnose and fix a broken `AuthorizationPolicy` caused by the classic YAML list `AND` vs. `OR` pitfall.
+4. Configure end-user JWT verification with `RequestAuthentication` and enforce claim-based access control (`request.auth.claims[groups]: ["group1"]`) with `AuthorizationPolicy`.
+5. Diagnose and fix a broken `AuthorizationPolicy` caused by the classic YAML list `AND` vs. `OR` pitfall (`INC-05` preview).
 
 ---
 
 ## Prerequisites & Version Baseline Pre-Flight Verification
 
-> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`  
 > **Fellowship Reference**: **[Week 05: Zero-Trust Security Architecture](../fellowship/week-05-zero-trust-security-architecture/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
 
-- Kubernetes `v1.36+` cluster with Istio `1.32.0` installed and the `orderflow` namespace workloads running.
+- Kubernetes `v1.36+` cluster with Istio `1.32.0` installed and the `orderflow` namespace workloads running, working from the `/home/chan/Documents/Istio` repository root.
 - Run the pre-flight verification check to confirm your Istio version and verify each workload in `orderflow` uses its dedicated `ServiceAccount` (`frontend-sa`, `order-sa`, `payment-sa`, `inventory-sa`, `toolbox-sa`):
   ```bash
   istioctl version
@@ -28,14 +38,14 @@ By the end of this lab, you will be able to:
 
 ```mermaid
 flowchart LR
-    Toolbox["client-toolbox<br/>(SA: toolbox-sa)<br/>(Blocked by Default, Allowed ONLY with Admin JWT)"] -.->|"GET /admin<br/>+ Valid JWT (role=admin)"| Order["order-service<br/>(SA: order-sa)"]
+    Toolbox["client-toolbox<br/>(SA: toolbox-sa)<br/>(Blocked by Default, Allowed ONLY with Admin JWT)"] -.->|"GET /admin<br/>+ Valid JWT (groups=group1)"| Order["order-service<br/>(SA: order-sa)"]
     
     Frontend["frontend<br/>(SA: frontend-sa)"] ===>|"ALLOWED:<br/>GET / POST /"| Order
     
     Order ===>|"ALLOWED:<br/>GET / POST /"| Payment["payment-service<br/>(SA: payment-sa)"]
     Order ===>|"ALLOWED:<br/>GET /"| Inventory["inventory-service<br/>(SA: inventory-sa)"]
 
-    LegacyPod["legacy-uninjected-client<br/>(No Sidecar / Plaintext)"] -.->|"REJECTED at TLS Layer<br/>(PeerAuthentication: STRICT)"| Order
+    LegacyPod["legacy-client<br/>(No Sidecar / Plaintext)"] -.->|"REJECTED at TLS Layer<br/>(PeerAuthentication: STRICT)"| Order
 ```
 
 ---
@@ -58,7 +68,12 @@ default           Cert Chain     ACTIVE     true           8a91b2c3d4e5f6...    
 ROOTCA            CA             ACTIVE     true           1f2e3d4c5b6a79...                    2036-11-14T15:00:00Z     2026-11-17T15:00:00Z
 ```
 
-Now decode the `default` leaf certificate chain and view its Issuer, Validity, and `X509v3 Subject Alternative Name`:
+> 🤔 **Predict Before You Execute**  
+> Based on [Lesson 04.1](./lessons/01-spiffe-identity-and-sds-lifecycle.md), when we decode `order-service`'s X.509 certificate below:
+> 1. What will appear in the X.509 `Subject:` field?
+> 2. What exact URI will appear under `X509v3 Subject Alternative Name`?
+
+Decode the `default` leaf certificate chain and view its Issuer, Validity, and `X509v3 Subject Alternative Name`:
 
 ```bash
 istioctl proxy-config secret "$ORDER_POD.orderflow" -o json | \
@@ -85,7 +100,7 @@ Notice that the `Subject` field of an Istio workload certificate is intentionall
 
 #### 2.1 Test Plaintext Access Under Default `PERMISSIVE` Mode
 
-Apply `peer-authentication-strict.yaml`? Wait — before applying it, let's deploy a temporary uninjected pod (`sidecar.istio.io/inject: "false"`) in `orderflow` to simulate a legacy non-mesh workload sending plaintext HTTP:
+Before enforcing `STRICT` mTLS, let's deploy a temporary uninjected pod (`sidecar.istio.io/inject: "false"`) in `orderflow` to simulate a legacy non-mesh workload sending plaintext HTTP:
 
 ```bash
 kubectl run legacy-client -n orderflow --image=curlimages/curl:8.5.0 \
@@ -107,10 +122,13 @@ HTTP Code: 200
 
 #### 2.2 Enforce `STRICT` mTLS Across `orderflow`
 
-Now apply `peer-authentication-strict.yaml`:
+> 🤔 **Predict Before You Execute**  
+> Right now, `istioctl proxy-config listener "$ORDER_POD.orderflow" --port 15006` shows both a `Trans: tls` and a `Trans: raw_buffer` filter chain for port `8080`. What will happen to the `Trans: raw_buffer` filter chain—and to `legacy-client`'s plaintext `curl` call—the moment you apply [`manifests/peer-authentication-strict.yaml`](./manifests/peer-authentication-strict.yaml)?
+
+Apply `peer-authentication-strict.yaml`:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/peer-authentication-strict.yaml
+kubectl apply -f 04-security-mtls-and-authz/manifests/peer-authentication-strict.yaml
 ```
 
 Inspect the inbound listener (`15006`) on `order-service` to see what changed under the hood:
@@ -146,27 +164,25 @@ kubectl delete pod legacy-client -n orderflow --now
 
 ### Step 3: Enforce Zero-Trust Microservice Segmentation (`AuthorizationPolicy`)
 
-Right now, even though mTLS is `STRICT`, **any** pod in the mesh (including `client-toolbox` or `frontend`) can directly call `payment-service` or `inventory-service`. In our architecture:
+Right now, even though mTLS is `STRICT`, **any** pod in the mesh (including `client-toolbox` or `frontend`) can directly call `payment-service` or `inventory-service`. In NovaPay's architecture:
 - Only `frontend-sa` should be allowed to call `order-service`.
 - Only `order-sa` should be allowed to call `payment-service` and `inventory-service`.
 - Direct calls from `client-toolbox` (`toolbox-sa`) to `order-service`, `payment-service`, or `inventory-service` must be **blocked (`403 Forbidden`)**!
 
-Apply `authorization-policies-zerotrust.yaml`:
+Apply [`manifests/authorization-policies-zerotrust.yaml`](./manifests/authorization-policies-zerotrust.yaml):
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/authorization-policies-zerotrust.yaml
+kubectl apply -f 04-security-mtls-and-authz/manifests/authorization-policies-zerotrust.yaml
 ```
-
-Let's test this Zero-Trust segmentation!
 
 #### 3.1 Verify Direct Unauthorized Calls from `client-toolbox` Are Blocked (`403 Forbidden`)
 
 ```bash
 echo "1. Toolbox -> payment-service (Should be 403):"
-kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- curl -s -i http://payment-service:8080 | head -n 5
+kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- curl -s -i http://payment-service:8080 | head -n 6
 
 echo "2. Toolbox -> order-service (Should be 403):"
-kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- curl -s -i http://order-service:8080 | head -n 5
+kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- curl -s -i http://order-service:8080 | head -n 6
 ```
 
 **Expected Output:**
@@ -204,19 +220,20 @@ Every hop in the legitimate call graph succeeds with `200 OK`, while lateral mov
 
 ### Step 4: End-User JWT Verification (`RequestAuthentication`) & Claim-Based `AuthorizationPolicy`
 
-Suppose we want to allow `client-toolbox` (or any caller) to access `order-service` on `/admin` **only if** the request carries a valid signed JWT with issuer `testing@secure.istio.io` and claim `"role": "admin"` (or group `"admin"`).
+Suppose we want to allow `client-toolbox` (or any caller) to access `order-service` on `/admin` **only if** the request carries a valid signed JWT with issuer `testing@secure.istio.io` and claim `groups: "group1"`.
 
-Apply `jwt-request-authn-and-authz.yaml`, which configures:
-1. A `RequestAuthentication` on `order-service` with an inline JWKS public key (works completely offline inside sandboxed clusters without needing internet access!).
+Apply [`manifests/jwt-request-authn-and-authz.yaml`](./manifests/jwt-request-authn-and-authz.yaml), which configures:
+1. A `RequestAuthentication` on `order-service` with an inline JWKS public key.
 2. An `AuthorizationPolicy` (`allow-order-admin-jwt`) allowing `GET` requests to `/admin*` when `request.auth.claims[groups]` contains `group1`.
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/jwt-request-authn-and-authz.yaml
+kubectl apply -f 04-security-mtls-and-authz/manifests/jwt-request-authn-and-authz.yaml
 ```
 
-Now let's test the three JWT scenarios from `client-toolbox`:
+> 🤔 **Predict Before You Execute**  
+> Before running Scenarios A, B, and C below, predict which scenario will return **`401 Unauthorized`** (rejected by `RequestAuthentication`) and which will return **`403 Forbidden`** (passed by `RequestAuthentication`, rejected by `AuthorizationPolicy`)!
 
-#### Scenario A: Request with an Invalid/Corrupted JWT -> `401 Unauthorized`
+#### Scenario A: Request with an Invalid/Corrupted JWT $\rightarrow$ `401 Unauthorized`
 
 ```bash
 kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- \
@@ -231,7 +248,7 @@ www-authenticate: Bearer realm="http://order-service:8080/admin", error="invalid
 Jwt is not in the form of Header.Payload.Signature with two dots and 3 sections
 ```
 
-#### Scenario B: Request with NO JWT to `/admin` -> `403 Forbidden`
+#### Scenario B: Request with NO JWT to `/admin` $\rightarrow$ `403 Forbidden`
 Because `RequestAuthentication` passes unauthenticated requests through without populating `requestPrincipals`, Envoy's `rbac` filter checks `AuthorizationPolicy` and denies the request:
 
 ```bash
@@ -246,14 +263,9 @@ HTTP/1.1 403 Forbidden
 RBAC: access denied
 ```
 
-#### Scenario C: Request with a Valid Signed JWT (`iss: testing@secure.istio.io`, `groups: ["group1", "group2"]`) -> `200 OK`
+#### Scenario C: Request with a Valid Signed JWT (`iss: testing@secure.istio.io`, `groups: ["group1", "group2"]`) $\rightarrow$ `200 OK`
 
-Use Istio's standard test JWT (expiring in year 2119, signed by the private key matching the inline JWKS in our manifest):
-
-```bash
-TOKEN="eyJhbGciOiJSUzI1NiIsImtpZCI6IkRIRmJwb0lVcXJZOHQyenBBMnFYZkNtcjVWTzVaRXI0UnpIVV8tUWl2dlEiLCJ0eXAiOiJKV1QifQ.eyJleHAiOjQ2ODU5ODk3MDAsImZvbyI6ImJhciIsImlhdCI6MTUzMjM4OTcwMCwiaXNzIjoidGVzdGluZ0BzZWN1cmUuaXN0aW8uaW8iLCJzdWIiOiJ0ZXN0aW5nQHNlY3VyZS5pc3Rpby5pbyIsImdyb3VwcyI6WyJncm91cDEiLCJncm91cDIiXX0.invalid_or_real"
-```
-*(Wait — let's pull the exact valid token directly from our ConfigMap in `jwt-request-authn-and-authz.yaml` so you don't have to copy-paste long strings!)*
+Pull the pre-packaged valid JWT token directly from our `sample-jwt-tokens` ConfigMap in `orderflow`:
 
 ```bash
 VALID_JWT=$(kubectl get configmap sample-jwt-tokens -n orderflow -o jsonpath='{.data.token-group1}')
@@ -268,15 +280,15 @@ HTTP/1.1 200 OK
 
 ---
 
-### Step 5: Troubleshooting Exercise — The `AND` vs. `OR` `AuthorizationPolicy` Trap
+### Step 5: Troubleshooting Exercise — The `AND` vs. `OR` `AuthorizationPolicy` Trap (`INC-05` Preview)
 
-A security engineer wants to allow `toolbox-sa` to call `inventory-service`, **but ONLY for HTTP `HEAD` health-check requests**. They write and apply `broken-authz-and-or-trap.yaml`:
+A security engineer wants to allow `toolbox-sa` to call `inventory-service`, **but ONLY for HTTP `HEAD` health-check requests**. They write and apply [`manifests/broken-authz-and-or-trap.yaml`](./manifests/broken-authz-and-or-trap.yaml):
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml
+kubectl apply -f 04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml
 ```
 
-Now test sending a **`DELETE`** request from `client-toolbox` (`toolbox-sa`) to `inventory-service`:
+Now test sending a destructive **`DELETE`** request from `client-toolbox` (`toolbox-sa`) to `inventory-service`:
 
 ```bash
 kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- \
@@ -286,8 +298,24 @@ kubectl exec -n orderflow "$TOOLBOX_POD" -c client-toolbox -- \
 **Expected Output:**
 `HTTP/1.1 200 OK`! Why did `DELETE /items/999` succeed when the policy was only supposed to allow `HEAD` requests?!
 
-#### Root Cause Analysis:
-Inspect `/home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml`:
+<details>
+<summary>💡 Hint 1: Inspect the `rules` list in `broken-authz-and-or-trap.yaml`</summary>
+
+Open [`manifests/broken-authz-and-or-trap.yaml`](./manifests/broken-authz-and-or-trap.yaml) and count how many list items (`-`) exist directly under `spec.rules:`.
+</details>
+
+<details>
+<summary>💡 Hint 2: Remember how Envoy evaluates multiple items inside `rules: []`</summary>
+
+In `AuthorizationPolicy`:
+- Fields inside the **same rule object** (`from:` and `to:` under a single `-`) are evaluated with **Logical AND**.
+- Separate list items (`- from:` followed by `- to:`) are evaluated as **two independent rules combined with Logical OR**!
+</details>
+
+<details>
+<summary>✅ Full Solution & Root Cause Analysis</summary>
+
+Inspect `04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml`:
 ```yaml
   rules:
     - from:
@@ -298,12 +326,32 @@ Inspect `/home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/broken-
             methods: ["HEAD"]
 ```
 Because `- to:` has a leading hyphen (`-`), Kubernetes YAML parses `rules` as an array of **two separate rules**:
-- **Rule 1**: Allow if `source.principals == toolbox-sa` (for **ANY** HTTP method and **ANY** path!).
+- **Rule 1**: Allow if `source.principals == toolbox-sa` (for **ANY** HTTP method and **ANY** path, including `DELETE /items/999`!).
 - **Rule 2**: Allow if `operation.methods == HEAD` (from **ANY** caller in the cluster!).
 
-#### Fix the Bug:
-Remove the extra `-` before `to:` so `from:` and `to:` belong to the **same rule object** (Logical AND), or delete the broken policy:
+**Fix**: Remove the extra `-` before `to:` so `from:` and `to:` belong to the **same rule object** (Logical AND), or delete the broken policy:
+```bash
+kubectl delete -f 04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml
+```
+</details>
+
+---
+
+## Cleanup Procedure
+
+Remove the Module 04 security policies before proceeding to Module 05 so resilience and fault-injection tests can call services directly from `client-toolbox` and `fortio-load`:
 
 ```bash
-kubectl delete -f /home/chan/Documents/Istio/04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml
+kubectl delete -f 04-security-mtls-and-authz/manifests/broken-authz-and-or-trap.yaml --ignore-not-found
+kubectl delete -f 04-security-mtls-and-authz/manifests/jwt-request-authn-and-authz.yaml --ignore-not-found
+kubectl delete -f 04-security-mtls-and-authz/manifests/authorization-policies-zerotrust.yaml --ignore-not-found
+kubectl delete -f 04-security-mtls-and-authz/manifests/peer-authentication-strict.yaml --ignore-not-found
 ```
+
+---
+
+## Production Considerations for NovaPay Engineers
+
+1. **Always Deploy the `allow-nothing` (`spec: {}`) Baseline First**: In a Zero-Trust namespace, deploy an `allow-nothing` policy alongside explicit per-workload `ALLOW` policies via GitOps (Argo CD / Flux) in a single atomic sync so newly added services never default to open access.
+2. **Automate Negative Authorization Testing in CI/CD**: Because a single YAML hyphen (`-`) changes `AND` to `OR`, every PR modifying an `AuthorizationPolicy` at NovaPay must include an automated negative test proving that an unauthorized HTTP method (e.g., `DELETE`) and an unauthorized `ServiceAccount` both receive `403 Forbidden`.
+3. **JWKS Endpoint Resilience**: When using `jwksUri` in `RequestAuthentication` with `REGISTRY_ONLY` egress mode enabled, ensure your external OIDC provider's JWKS domain is registered in a `ServiceEntry` so `istiod` can fetch the JWKS public keys without being blocked by `BlackHoleCluster`.

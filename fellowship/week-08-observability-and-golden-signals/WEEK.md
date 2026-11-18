@@ -1,3 +1,5 @@
+[Fellowship Portal](../../README.md) · [Handbook](../../FELLOWSHIP_HANDBOOK.md) · [Progression Dashboard](../../PROGRESSION_DASHBOARD.md) · [<- Previous Week](../week-07-progressive-delivery-and-safe-releases/WEEK.md) · **Week 08 of 10** · [Next Week ->](../week-09-incident-response-and-control-plane-ops/WEEK.md)
+
 # Week 08: Production Observability, Golden Signals & Distributed Tracing
 
 **Phase 4: Observability, Operations & Capstone** | **Schedule**: Week 08 of 10  
@@ -5,6 +7,13 @@
 **Core Curriculum Links**:
 - 📖 **Technical Lecture**: [Module 07 — Observability and Telemetry (`README.md`)](../../07-observability-and-telemetry/README.md)
 - 🧪 **Guided Hands-On Lab**: [Module 07 Lab — `Telemetry` API, Golden Signals, Access Logs & Distributed Tracing (`LAB.md`)](../../07-observability-and-telemetry/LAB.md)
+
+> [!NOTE]
+> ### Where You Are & What You Need Before Starting
+> - **Current Phase**: Phase 4 — Observability, Operations & Capstone (Week 08 of 10)
+> - **Prerequisites**: Completed Phase 3 (Weeks 06–07: Resilience, Circuit Breaking & Progressive Delivery) plus Prometheus, Grafana, Jaeger, and Kiali running in `istio-system`
+> - **Estimated Time**: ~6–8 hours
+> - **Tangible Weekly Deliverable**: Production `telemetry.istio.io/v1` pipeline with bounded CEL metric tags (`payment_region`, `merchant_tier`), CEL-filtered error-only JSON access logs, `100%` canary trace sampling, and dual-reporter SLO PromQL queries (`NP-108`)
 
 ---
 
@@ -78,9 +87,13 @@ NovaPay requires a high-signal, cost-efficient observability architecture that s
 
 ## 📅 Tuesday — Technical Lectures & Architecture Deep-Dive
 
-### 📚 Assigned Core Reading
-Read the complete technical lecture for Module 07 before proceeding:
-👉 **[Module 07: Observability and Telemetry — Technical Lecture (`../../07-observability-and-telemetry/README.md`)](../../07-observability-and-telemetry/README.md)**
+### 📚 Assigned Core Reading & Modular Lessons
+Study the complete architectural overview and progressive lessons in Module 07 before proceeding:
+- 👉 **Core Module Overview**: **[Module 07: Observability and Telemetry — Technical Lecture (`../../07-observability-and-telemetry/README.md`)](../../07-observability-and-telemetry/README.md)**
+- **Modular Deep-Dive Lessons**:
+  1. [Lesson 07.1: Envoy Telemetry Architecture & Dual-Reporter Golden Signals](../../07-observability-and-telemetry/lessons/01-envoy-telemetry-and-dual-reporter-metrics.md)
+  2. [Lesson 07.2: The `Telemetry` API, Cardinality Control & CEL Error-Only Logs](../../07-observability-and-telemetry/lessons/02-telemetry-api-metrics-and-cel-access-logs.md)
+  3. [Lesson 07.3: Distributed Tracing & W3C/B3 Header Propagation](../../07-observability-and-telemetry/lessons/03-distributed-tracing-and-context-propagation.md)
 
 ### 📝 Alex Morgan's Guided Study Notes
 
@@ -225,6 +238,16 @@ kubectl logs -n novapay deploy/order-service -c istio-proxy --tail=20
 ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Coaching Hints**:
+> 1. **Guarding CEL Header Lookups**: In `tagOverrides`, always wrap `request.headers['...']` with `has(request.headers['x-payment-region']) ? request.headers['x-payment-region'] : 'unspecified'` so requests without the header don't fail CEL evaluation.
+> 2. **Removing Tags vs. Upserting Tags**: Use `operation: UPSERT` when adding/overwriting `payment_region` and `merchant_tier`, and `operation: REMOVE` (with no `value` field) when stripping `request_protocol` from `REQUEST_COUNT`.
+> 3. **Canary Workload Override**: In `payment-v2-debug-telemetry`, use `spec.selector.matchLabels: { app: payment-service, version: v2 }` and set `duration > duration('500ms')` inside the CEL `accessLogging[0].filter.expression`.
+
+</details>
 
 <details>
 <summary>Click to Reveal Reference Solution & Alex's Code Review</summary>
@@ -400,6 +423,16 @@ func forwardToPaymentService( incomingReq *http.Request, payload io.Reader ) (*h
    ```
 
 ---
+
+<details>
+<summary>Need a Hint from Alex Morgan? (Click before revealing the full answer)</summary>
+
+> **Alex's Diagnostic Hints**:
+> 1. **High-Cardinality UUID Tag**: `request.headers['x-request-id']` generates a brand-new unique UUID on every single HTTP request! Putting a unique per-request UUID into Prometheus `tagOverrides` multiplies your TSDB series count by every request that enters the cluster.
+> 2. **Why Zero Access Logs Are Emitted**: Look at `accessLogging[0]` in `broken-audit-telemetry`: first, `disabled: true` turns off access logging completely! Second, look at the boolean operator in `response.code >= 500 && response.code < 400`—can a single integer ever be $\ge 500$ **AND** $< 400$ at the same time?
+> 3. **Why Jaeger Traces Split Into 1-Span Orphans**: Look at `forwardToPaymentService` in `order_handler.go`—it constructs `http.NewRequestWithContext(context.Background(), ...)` and never copies `traceparent`, `tracestate`, `x-request-id`, or `x-b3-*` headers from `incomingReq.Header` to `outReq.Header`!
+
+</details>
 
 <details>
 <summary>Click to Reveal Root Cause Analysis (RCA), Remediation & Postmortem</summary>

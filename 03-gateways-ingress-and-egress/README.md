@@ -1,26 +1,46 @@
-# Module 03: Gateways, North-South Ingress, Kubernetes Gateway API & Controlled Egress
+# Module 03: Gateways, North-South Ingress, Kubernetes Gateway API (`v1.6.1`) & Controlled Egress
 
-> **Version & Fellowship Context**
-> - **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
-> - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 04: Edge Gateways & Controlled Egress](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)**.
+> **Navigation**: [Fellowship Portal](../README.md) > [Week 04: Edge Gateways & Controlled Egress](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md) > **Module 03 Architecture Hub** | [Guided Lab (`LAB.md`)](./LAB.md)  
+> **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `1.36+` | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).  
+> **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 04: Edge Gateways & Controlled Egress](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)** (Engineering Ticket `NP-104` & Incident `INC-04`).
 
-## 1. North-South Traffic Architecture in Istio
+---
 
-In Modules 01 and 02, we focused on **East-West** traffic (service-to-service communication inside the mesh). **North-South** traffic refers to traffic entering the cluster from outside (**Ingress**) or leaving the cluster to external APIs, SaaS providers, or legacy databases (**Egress**).
+## 🎙️ Alex Morgan's Module 03 Architecture Briefing
 
-### 1.1 What Is an Istio Gateway Pod Under the Hood?
+> **Alex Morgan (Senior Platform Engineer, NovaPay)**: *"In Modules 01 and 02, all of our traffic stayed safely inside the cluster (**East-West**). In Module 03, we engineer the perimeter of the NovaPay payment platform (**North-South** Ingress and Egress).*
+>
+> *To keep this module crisp and digestible, we have broken it into **three focused 25–30 minute lessons**. Start with Lesson 03.1 to understand how a standalone Envoy Gateway pod terminates edge TLS via SDS and routes directly to workload Pod IPs over SPIFFE mTLS. Then move to Lesson 03.2 to master the **Kubernetes Gateway API `v1.6.1`**—including automated gateway deployment provisioning by `istiod`. Finally, in Lesson 03.3, join Maya Patel and Sarah Chen to lock down outbound internet traffic with `REGISTRY_ONLY`, `ServiceEntry` TLS Origination, and a dedicated PCI-DSS `istio-egressgateway`."*
 
-A common misconception is that `istio-ingressgateway` or `istio-egressgateway` is a special piece of software distinct from the sidecar proxy.
-**Under the hood, an Istio Gateway pod is simply a standalone Envoy proxy (`pilot-agent` + `envoy`) running in a pod without an application container and without `iptables` traffic redirection.**
+---
+
+## 🗺️ Progressive Lesson Milestones Table
+
+Complete these three modular lessons in order before executing the hands-on **[Module 03 Guided Lab (`./LAB.md`)](./LAB.md)**:
+
+| Lesson | Title & Core Architecture Focus | Est. Time | NovaPay Fellowship Milestone |
+| :--- | :--- | :--- | :--- |
+| **[Lesson 03.1](./lessons/01-north-south-gateways-and-tls-modes.md)** | **North-South Gateways, Classic `Gateway` Binding & Edge TLS Modes**<br/>Standalone Envoy Gateway pods (`0.0.0.0:8443` vs. `15001`/`15006`), direct EDS routing over internal mTLS, `gateways: ["mesh", "..."]` binding rule, and `SIMPLE`/`MUTUAL`/`PASSTHROUGH`/`AUTO_PASSTHROUGH` TLS modes. | **25 min** | Expose `frontend` & `order-service` over HTTPS and diagnose `INC-04` (cross-namespace SDS `credentialName` rules). |
+| **[Lesson 03.2](./lessons/02-kubernetes-gateway-api.md)** | **Kubernetes Gateway API (`v1.6.1`) & Automated Gateway Provisioning**<br/>`GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, graduated `v1` `TCPRoute`/`UDPRoute`, `istiod` automated `Deployment`/`Service` provisioning, two-way `allowedRoutes`/`parentRefs` handshake, and `ReferenceGrant`. | **25 min** | Migrate NovaPay's North-South edge from Classic Istio CRDs to portable Kubernetes Gateway API `v1.6.1`. |
+| **[Lesson 03.3](./lessons/03-zero-trust-egress-and-tls-origination.md)** | **Zero-Trust Egress (`REGISTRY_ONLY`), `ServiceEntry` & Egress Gateways**<br/>`ALLOW_ANY` (`PassthroughCluster`) vs. `REGISTRY_ONLY` (`BlackHoleCluster`), `ServiceEntry` (`DNS`/`STATIC`/`NONE`), sidecar TLS origination (`:80` $\rightarrow$ `:443`), and multi-hop `istio-egressgateway` routing with CNI `NetworkPolicy`. | **30 min** | Lock down `orderflow` outbound internet traffic for PCI-DSS Requirement 1.3 (`NP-104`). |
+| **[Guided Lab](./LAB.md)** | **Hands-On Lab 03: Edge TLS, Gateway API `v1.6.1` & Controlled Egress**<br/>Step-by-step cluster verification with "Predict Before You Execute" checks and progressive troubleshooting hints. | **45 min** | Verify all 4 North-South ingress and egress architectures on your live cluster. |
+
+---
+
+## 1. North-South Ingress Architecture Synthesis
+
+> 📖 **Deep Dive**: Read **[Lesson 03.1: North-South Gateways & Edge TLS Modes](./lessons/01-north-south-gateways-and-tls-modes.md)** for full implementation details.
+
+An Istio Gateway pod (`istio-ingressgateway` or an auto-provisioned Gateway API pod) is a **standalone Envoy `v1.40` proxy (`pilot-agent` + `envoy`) running without an application container and without `iptables` redirection**.
 
 ```mermaid
 flowchart LR
-    ExternalClient["External Client / Internet"] -->|"TLS :443<br/>Host: orderflow.example.com"| CloudLB["Kubernetes LoadBalancer Service<br/>(istio-ingressgateway)"]
+    ExternalClient["External Client / Internet"] -->|"1. TLS :443<br/>SNI: orderflow.example.com"| CloudLB["Kubernetes LoadBalancer Service<br/>(istio-ingressgateway)"]
     
     subgraph GatewayPod["Pod: istio-ingressgateway (Standalone Envoy)"]
-        Listener["Physical Listener<br/>0.0.0.0:8443 (TargetPort)"]
-        SDS["SDS Secret:<br/>orderflow-tls-cert"]
-        RDS["Route Table (RDS)<br/>Match / -> frontend<br/>Match /orders -> order-service"]
+        Listener["2. Physical Listener<br/>0.0.0.0:8443 (TargetPort)"]
+        SDS["3. SDS Secret:<br/>orderflow-tls-credential"]
+        RDS["4. Route Table (RDS)<br/>Match / -> frontend<br/>Match /orders -> order-service"]
         Listener -->|"Terminate External TLS"| RDS
         SDS -.-> Listener
     end
@@ -28,79 +48,57 @@ flowchart LR
     CloudLB --> Listener
 
     subgraph OrderflowNS["Namespace: orderflow"]
-        Frontend["Pod: frontend<br/>(:15006 Inbound Envoy -> :8080)"]
-        OrderSvc["Pod: order-service<br/>(:15006 Inbound Envoy -> :8080)"]
+        Frontend["5a. Pod: frontend<br/>(:15006 Inbound Envoy -> :8080)"]
+        OrderSvc["5b. Pod: order-service<br/>(:15006 Inbound Envoy -> :8080)"]
     end
 
     RDS ===>|"Internal Mesh mTLS (SPIFFE)<br/>Direct to Pod IP via EDS"| Frontend
     RDS ===>|"Internal Mesh mTLS (SPIFFE)<br/>Direct to Pod IP via EDS"| OrderSvc
 ```
 
-Notice two critical architectural details:
-1. **Physical Listeners Instead of Virtual Listeners**:
-   Because a Gateway pod has no application container, it does not use `iptables` or `15001`/`15006`. Instead, when you configure a `Gateway` on port `443` (mapped to container port `8443` or `443`), `istiod` programs Envoy via **LDS** to bind directly to `0.0.0.0:8443` (or `0.0.0.0:443`).
-2. **Direct EDS Routing Over Mesh mTLS**:
-   Unlike standard NGINX Ingress Controllers (which forward traffic to a Kubernetes `Service` ClusterIP unless special annotations are used), the Istio Ingress Gateway is a **full member of the Istio service mesh**. After terminating external edge TLS, it uses **EDS** to pick the target Pod IP directly and establishes **internal SPIFFE mTLS** all the way to the destination pod's sidecar (`15006`).
+### 6-Part Mechanism Walkthrough: Standalone Envoy Ingress Gateway
+1. **What initiates the operation?**
+   An external client connects to the `istio-ingressgateway` LoadBalancer IP on TCP port `443` and sends a TLS `ClientHello` with SNI `orderflow.example.com`.
+2. **Which component receives it?**
+   The Kubernetes `LoadBalancer` Service maps external port `443` to container `targetPort: 8443` on the `istio-ingressgateway` pod, where Envoy's physical listener `0.0.0.0:8443` accepts the socket.
+3. **What information is exchanged?**
+   Envoy matches the SNI hostname against its TLS filter chain, presents the X.509 certificate fetched in memory via **SDS** (`kubernetes://orderflow-tls-credential`), terminates external TLS, and evaluates the HTTP request against its **RDS** virtual host route table.
+4. **What changes in the system?**
+   Envoy selects a destination pod IP directly from the **EDS** endpoint pool (`frontend` or `order-service`)—bypassing `kube-proxy` ClusterIP routing—and originates an internal **SPIFFE mTLS** connection to the target workload pod's `:15006` inbound listener.
+5. **How can you observe/verify it on your cluster?**
+   Run `istioctl proxy-config secret <igw-pod>.istio-system` to verify the active SDS certificate and `istioctl proxy-config listener <igw-pod>.istio-system --port 8443` to inspect the physical listener filter chains.
+6. **What happens if a component fails?**
+   If the TLS Secret is placed in `orderflow` instead of `istio-system` (for Classic Istio `Gateway`), SDS fails to load the certificate and the gateway resets incoming TLS connections (`INC-04`). If the client omits the TLS SNI header (connecting by raw IP without `--resolve`), the filter chain match fails and the TLS handshake is aborted.
 
 ---
 
-## 2. Comparing Kubernetes `Ingress`, Istio `Gateway`, and the Kubernetes Gateway API
+## 2. Comparing Kubernetes `Ingress`, Classic Istio `Gateway` & Gateway API `v1.6.1`
 
-Istio supports three ways to configure North-South ingress traffic. Understanding their evolution is essential for modern production architecture:
+> 📖 **Deep Dive**: Read **[Lesson 03.2: Kubernetes Gateway API (`v1.6.1`) & Automated Gateway Provisioning](./lessons/02-kubernetes-gateway-api.md)** for role-oriented architecture and `ReferenceGrant` patterns.
 
-| Feature | Kubernetes `Ingress` (`networking.k8s.io/v1`) | Istio Classic `Gateway` + `VirtualService` | **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) |
+| Feature | Kubernetes `Ingress` (`networking.k8s.io/v1`) | Istio Classic `Gateway` + `VirtualService` | **Kubernetes Gateway API `v1.6.1`** (`gateway.networking.k8s.io/v1`) |
 | :--- | :--- | :--- | :--- |
-| **Design Era** | 2015 (Legacy) | 2018 (Istio-native) | **2023+ (Modern Standard & Istio Future Default)** |
+| **Design Era** | 2015 (Legacy) | 2018 (Istio-native) | **2023–2026+ (Modern CNCF Standard & Istio Default)** |
 | **Role Separation** | Single monolithic resource mixes TLS, hostnames, and app paths. | Decouples L4/TLS (`Gateway`) from L7 Routing (`VirtualService`). | Decouples Infrastructure (`GatewayClass`), Cluster Ops (`Gateway`), and App Devs (`HTTPRoute`, `GRPCRoute`, `TLSRoute`, `TCPRoute`, `UDPRoute`). |
-| **Vendor Portability** | Relies on vendor-specific `metadata.annotations` for anything beyond basic path routing. | Istio-specific CRDs (`networking.istio.io`). | Portable CNCF standard across Istio, Envoy Gateway, Cilium, GKE, Kong, NGINX. |
-| **Binding Direction** | Monolithic. | `VirtualService` references `gateways: [my-gw]` (Consumer points to Gateway). | Two-way handshake: `Gateway` defines `allowedRoutes` (which namespaces may attach), and `HTTPRoute` defines `parentRefs` (Producer + Consumer consent). |
-| **Gateway Pod Provisioning** | Requires pre-installed controller Deployment. | Requires pre-installed `istio-ingressgateway` Deployment matching `selector: {istio: ingressgateway}`. | **Automated Deployment Provisioning**: Creating a `Gateway` with `gatewayClassName: istio` automatically causes `istiod` to provision the Deployment & LoadBalancer Service! |
-
-> [!NOTE]
-> **Kubernetes Gateway API `v1.6.1` Milestone (`TCPRoute` & `UDPRoute` Graduation)**
-> In our **Gateway API `v1.6.1`** baseline (`standard-install.yaml`), **`TCPRoute` and `UDPRoute` have officially graduated to the Standard (`gateway.networking.k8s.io/v1`) channel**, joining `GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, and `ReferenceGrant`. You no longer need to install `experimental-install.yaml` for standard L4 TCP/UDP gateway routing in Istio `1.32.0`.
-
-### 2.1 How Classic Istio `Gateway` + `VirtualService` Bind Together
-
-In the classic Istio API:
-1. The **`Gateway`** resource selects the gateway pod (`selector: {istio: ingressgateway}`) and configures **LDS** (ports, protocols, SNI hosts, and edge TLS certificates via `credentialName`).
-   - *Gotcha*: A `Gateway` resource with no `VirtualService` bound to it causes Envoy to listen on the port (or hold the config) with no routes! In fact, for HTTP listeners, Envoy may not even open the socket until a route is attached, or will immediately return `404 Not Found`.
-2. The **`VirtualService`** binds to the `Gateway` via `spec.gateways: ["orderflow/orderflow-gateway"]` and matching `spec.hosts: ["orderflow.example.com"]`, programming **RDS** on that gateway listener.
-   - *Crucial Rule*: If a `VirtualService` specifies `gateways: ["orderflow-gateway"]`, those routing rules apply **only** to traffic entering through that Gateway — they do **not** apply to internal East-West pod-to-pod calls unless you also include the reserved keyword **`mesh`** in `gateways: ["orderflow-gateway", "mesh"]`!
+| **Vendor Portability** | Relies on vendor-specific `metadata.annotations`. | Istio-specific CRDs (`networking.istio.io/v1`). | Portable CNCF standard across Istio, Envoy Gateway, Cilium, GKE, Kong, NGINX. |
+| **Binding Direction** | Monolithic. | `VirtualService` references `gateways: [my-gw]` (Consumer points to Gateway). | Two-way handshake: `Gateway` defines `allowedRoutes` and `HTTPRoute` defines `parentRefs` (Producer + Consumer consent). |
+| **Gateway Pod Provisioning** | Requires pre-installed controller Deployment. | Requires pre-installed `istio-ingressgateway` Deployment matching `selector`. | **Automated Deployment Provisioning**: Creating a `Gateway` with `gatewayClassName: istio` automatically causes `istiod` to provision the Deployment & LoadBalancer Service! |
 
 ---
 
-## 3. Edge TLS Modes (`SIMPLE`, `MUTUAL`, `PASSTHROUGH`, `AUTO_PASSTHROUGH`)
+## 3. Zero-Trust Egress Architecture Synthesis
 
-When configuring a TLS listener on an Istio `Gateway`, `tls.mode` determines how Envoy handles the TLS handshake:
+> 📖 **Deep Dive**: Read **[Lesson 03.3: Zero-Trust Egress (`REGISTRY_ONLY`), `ServiceEntry`, TLS Origination & Egress Gateways](./lessons/03-zero-trust-egress-and-tls-origination.md)** for full PCI-DSS egress design.
 
-| TLS Mode | How Envoy Processes the Connection | Production Use Case |
-| :--- | :--- | :--- |
-| **`SIMPLE`** | Envoy terminates TLS at the gateway using the X.509 certificate and private key loaded via SDS from the Kubernetes `Secret` named in `credentialName`. | Standard HTTPS web apps and REST/gRPC APIs (`https://orderflow.example.com`). |
-| **`MUTUAL`** | Envoy terminates TLS **and** requires the external client to present a valid client X.509 certificate signed by the CA bundle in `credentialName` (`ca.crt`). | B2B Partner APIs, OpenBanking (mTLS at the edge), IoT device ingestion. |
-| **`PASSTHROUGH`** | Envoy **does not terminate TLS**. It inspects the unencrypted **SNI (Server Name Indication)** extension in the TLS `ClientHello` packet and forwards the raw encrypted TCP stream to the backend service specified in a `VirtualService` `tls:` route block. | End-to-end TLS where the backend application pod holds its own TLS private key and must terminate TLS itself for compliance. |
-| **`AUTO_PASSTHROUGH`** | Envoy inspects the SNI header (which Istio formats as `outbound_.8080_._.order-service.orderflow.svc.cluster.local`) and automatically routes the mTLS connection to the matching mesh cluster without needing a `VirtualService`. | Multi-cluster Istio East-West Gateways connecting private pod networks across regions/clouds. |
-
-> **Important Secret Location Rule for `credentialName`**:
-> In Classic Istio `Gateway`, the Kubernetes `tls` Secret referenced by `credentialName` **must** live in the **same namespace as the Gateway pod** (typically `istio-system`), *even if* the `Gateway` CRD itself is created in the `orderflow` namespace! (In Kubernetes Gateway API, cross-namespace Secret references are explicitly governed by `ReferenceGrant`).
-
----
-
-## 4. Egress Traffic Management: Controlling What Leaves the Mesh
-
-In a Zero-Trust production environment (such as PCI-DSS payment processing in `payment-service`), allowing compromised pods to open outbound connections to arbitrary internet IPs (data exfiltration or C2 callbacks) is unacceptable.
-
-### 4.1 `outboundTrafficPolicy.mode`: `ALLOW_ANY` vs. `REGISTRY_ONLY`
-
-Istio controls unknown outbound destinations via `meshConfig.outboundTrafficPolicy.mode`:
+### 3.1 `outboundTrafficPolicy.mode`: `ALLOW_ANY` vs. `REGISTRY_ONLY`
 
 ```mermaid
 flowchart TB
-    App["Pod: payment-service<br/>Calls https://httpbin.org/post"] --> OutEnvoy["Outbound Envoy Sidecar (:15001)"]
+    App["Pod: payment-service<br/>Calls http://httpbin.org/headers"] --> OutEnvoy["Outbound Envoy Sidecar (:15001)"]
     
     OutEnvoy --> Check{"Is httpbin.org in<br/>Istio Service Registry?"}
     
-    Check -->|"Yes (ServiceEntry Exists)"| KnownCluster["Cluster: outbound|443||httpbin.org<br/>(Apply mTLS/TLS Origination, Retries, Telemetry)"]
+    Check -->|"Yes (ServiceEntry Exists)"| KnownCluster["Cluster: outbound|80||httpbin.org / outbound|443||httpbin.org<br/>(Apply mTLS/TLS Origination, Retries, Telemetry)"]
     
     Check -->|"No (Unknown Host/IP)"| Mode{"outboundTrafficPolicy.mode?"}
     
@@ -108,53 +106,61 @@ flowchart TB
     Mode -->|"REGISTRY_ONLY (Zero-Trust)"| BlackHole["Cluster: BlackHoleCluster<br/>(Drops connection / HTTP 502 Bad Gateway)"]
 ```
 
-- **`ALLOW_ANY` (Istio Default)**: Any outbound destination not in Istio's internal service registry is routed to Envoy's special **`PassthroughCluster`**, which lets the connection exit to the original destination IP untouched. Convenient for getting started, dangerous for strict security compliance.
-- **`REGISTRY_ONLY`**: Unknown destinations are routed to **`BlackHoleCluster`**, which immediately drops TCP connections (or returns `502 Bad Gateway` for HTTP). External hosts can only be reached if explicitly registered via a **`ServiceEntry`**.
+#### 6-Part Mechanism Walkthrough: Outbound Registry Lookup (`ALLOW_ANY` vs. `REGISTRY_ONLY`)
+1. **What initiates the operation?**
+   A pod in `orderflow` (`payment-service` or `client-toolbox`) initiates an outbound connection to an external hostname (`httpbin.org`).
+2. **Which component receives it?**
+   Pod `iptables` redirects the outbound TCP socket to the local Envoy sidecar's `virtualOutbound` listener (`127.0.0.1:15001`).
+3. **What information is exchanged?**
+   Envoy matches the target port and HTTP `Host` header (or TLS SNI) against the active Service Registry listeners/routes compiled by `istiod`.
+4. **What changes in the system?**
+   - If the external host is registered via a `ServiceEntry`, Envoy routes the stream to the dedicated cluster (`outbound|80||httpbin.org` or `outbound|443||httpbin.org`) and applies configured `VirtualService` and `DestinationRule` policies.
+   - If the host is unregistered, Envoy falls back to either `PassthroughCluster` (when `mode: ALLOW_ANY`) or `BlackHoleCluster` (when `mode: REGISTRY_ONLY`, immediately failing with `502 Bad Gateway` / TCP drop).
+5. **How can you observe/verify it on your cluster?**
+   Inspect `kubectl get cm istio -n istio-system -o yaml` and query `istio_requests_total{destination_service=~"PassthroughCluster|BlackHoleCluster"}` or Envoy sidecar access logs.
+6. **What happens if a component fails?**
+   If `REGISTRY_ONLY` is enabled without a matching `ServiceEntry` for a required external endpoint, outbound calls fail immediately with `502 Bad Gateway` (`BlackHoleCluster`).
 
-> **Security Nuance**: Is `REGISTRY_ONLY` + `ServiceEntry` alone a complete firewall?
-> **No!** Remember from Module 01 that `VirtualService` HTTP routing relies on the HTTP `Host` header (or TLS SNI). A malicious binary running inside a pod could spoof `Host: allowed-domain.com` while opening a TCP socket to an arbitrary IP if `resolution: NONE` is used, or bypass Envoy if it compromises the pod's network namespace. In production, combine **Egress Gateways** + Kubernetes **`NetworkPolicy`** so application pods cannot route to `0.0.0.0/0` directly; only the `istio-egressgateway` pods are permitted by CNI `NetworkPolicy` to exit the cluster!
+---
 
-### 4.2 Registering External Services with `ServiceEntry`
-
-A `ServiceEntry` inserts an external (or unmanaged internal) endpoint into Istio's abstract Service Registry so `istiod` creates a real Envoy Cluster (`outbound|80||httpbin.org`) for it:
-
-| Field | Options | How Envoy Handles It |
-| :--- | :--- | :--- |
-| **`location`** | `MESH_EXTERNAL` / `MESH_INTERNAL` | `MESH_EXTERNAL` tells Istio the service is outside the mesh (disables automatic Istio mTLS by default). |
-| **`resolution`** | `DNS`, `STATIC`, `NONE` | **`DNS`**: Envoy periodically queries DNS to resolve the hostname in `hosts` (`STRICT_DNS` / `LOGICAL_DNS` cluster).<br/>**`STATIC`**: Envoy load-balances across explicit static IP addresses listed in `endpoints`.<br/>**`NONE`**: Envoy assumes connections are already addressed to the target IP (`ORIGINAL_DST`). |
-
-### 4.3 TLS Origination by the Sidecar (`DestinationRule` `SIMPLE` TLS)
-
-Suppose `payment-service` needs to call an external HTTPS payment processor (`https://httpbin.org:443`), or you want the Envoy proxy to manage TLS connection pooling, cipher suites, and HTTP header telemetry without the application managing TLS certificates.
-
-With **TLS Origination**:
-1. The application container makes a fast, local **plaintext HTTP** request (`http://httpbin.org:80/get`).
-2. A `ServiceEntry` registers port `80` (HTTP) and port `443` (HTTPS) for `httpbin.org`.
-3. A `VirtualService` redirects/routes port `80` traffic to destination port `443`, and a `DestinationRule` on port `443` specifies `tls.mode: SIMPLE` with `sni: httpbin.org`.
-4. Envoy transparently encrypts the outbound request into HTTPS (`:443`) before it ever leaves the pod!
-
-### 4.4 Routing Egress Through a Dedicated `istio-egressgateway`
-
-Why route external traffic through a centralized `istio-egressgateway` Deployment instead of letting each pod's sidecar talk directly to the internet?
+### 3.2 Multi-Hop Egress Routing Through `istio-egressgateway`
 
 ```mermaid
 flowchart LR
     subgraph AppNode["Application Nodes (No Public IP / Blocked by NetworkPolicy)"]
         PayPod["Pod: payment-service"]
-        PaySidecar["Sidecar Envoy<br/>(:15001)"]
-        PayPod -->|"1. Plain HTTP<br/>http://httpbin.org"| PaySidecar
+        PaySidecar["1. Sidecar Envoy (:15001)"]
+        PayPod -->|"Plain HTTP :80<br/>http://httpbin.org"| PaySidecar
     end
 
-    subgraph EgressNode["Dedicated Egress Nodes (Static Elastic IP for Partner Firewall)"]
-        EgressGW["Pod: istio-egressgateway<br/>(Gateway :443 + DestinationRule TLS Origination)"]
+    subgraph EgressNode["Dedicated Egress Nodes (Static NAT IP for Partner Firewall)"]
+        EgressGW["2. Pod: istio-egressgateway<br/>(Gateway :443 + DestinationRule TLS Origination)"]
     end
 
-    ExtAPI["External Partner API<br/>(https://httpbin.org:443)"]
+    ExtAPI["3. External Partner API<br/>(https://httpbin.org:443)"]
 
-    PaySidecar ===>|"2. Internal Mesh mTLS<br/>(:443)"| EgressGW
-    EgressGW ===>|"3. Originate External HTTPS :443<br/>(Predictable Source IP + Central Audit Log)"| ExtAPI
+    PaySidecar ===>|"Hop 1: Internal Mesh mTLS (:443)"| EgressGW
+    EgressGW ===>|"Hop 2: Originate External HTTPS :443<br/>(Predictable Source IP + Central Audit Log)"| ExtAPI
 ```
 
-1. **Predictable Source IP Whitelisting**: External B2B payment gateways and legacy enterprise firewalls often require whitelisting a small set of static source IPs. By scheduling `istio-egressgateway` pods onto dedicated egress nodes with Static NAT IPs, all external traffic originates from those fixed IPs.
-2. **Defense-in-Depth Network Isolation**: You can apply a Kubernetes `NetworkPolicy` blocking all workload namespaces (`orderflow`) from reaching outside the cluster CIDR, allowing them only to reach `istio-egressgateway` in `istio-system`.
-3. **Centralized Egress Auditing & Policy**: A single chokepoint to log, rate-limit, and enforce `AuthorizationPolicy` on which specific workload `ServiceAccount` (`payment-sa` only!) is allowed to exit through the Egress Gateway.
+#### 6-Part Mechanism Walkthrough: Egress Gateway Funnel & TLS Origination
+1. **What initiates the operation?**
+   `payment-service` sends a plaintext HTTP request (`http://httpbin.org/headers` on port `80`).
+2. **Which component receives it?**
+   The local workload Envoy sidecar (`:15001`) intercepts the request, matches the `mesh` gateway rule in the `VirtualService`, and forwards it over internal SPIFFE mTLS (`:443`) to `istio-egressgateway` in `istio-system`.
+3. **What information is exchanged?**
+   `istio-egressgateway` terminates internal mesh mTLS on physical port `8443` (`tls.mode: ISTIO_MUTUAL`), inspects the HTTP `Host: httpbin.org` header, and routes the request to `outbound|443||httpbin.org`.
+4. **What changes in the system?**
+   `istio-egressgateway` applies the `DestinationRule` (`tls.mode: SIMPLE`, `sni: httpbin.org`) to originate an outbound external HTTPS (`:443`) connection from the dedicated egress node's static NAT IP to `httpbin.org`.
+5. **How can you observe/verify it on your cluster?**
+   Check `kubectl logs -n istio-system -l app=istio-egressgateway --tail=10` to confirm the request traversed `istio-egressgateway` and verify `"X-Forwarded-Proto": "https"` in the response from `httpbin.org/headers`.
+6. **What happens if a component fails?**
+   If a compromised pod attempts to bypass `istio-egressgateway` and connect directly to an external IP, the namespace's Kubernetes CNI `NetworkPolicy` drops the packet at L3/L4 because only `istio-egressgateway` is permitted to egress outside the cluster CIDR.
+
+---
+
+## 🚀 Next Steps
+
+1. Complete the three lessons above (`03.1` $\rightarrow$ `03.2` $\rightarrow$ `03.3`).
+2. Execute the hands-on **[Module 03 Lab (`./LAB.md`)](./LAB.md)**.
+3. Complete your Thursday engineering ticket (`NP-104`) and Friday incident simulation (`INC-04`) in **[Week 04: Edge Gateways & Controlled Egress (`../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md`)](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)**.
