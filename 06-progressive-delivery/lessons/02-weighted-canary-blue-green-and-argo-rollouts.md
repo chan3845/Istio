@@ -148,10 +148,10 @@ Inspect the production Argo Rollouts + Istio manifest and test weighted canary d
 
 ```bash
 # 1. Inspect the production Argo Rollouts + AnalysisTemplate specification
-cat /home/chan/Documents/Istio/06-progressive-delivery/manifests/argo-rollouts-istio-example.yaml
+cat 06-progressive-delivery/manifests/argo-rollouts-istio-example.yaml
 
 # 2. Apply the 90/10 weighted canary manifest in orderflow
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/03-canary-90-10.yaml
+kubectl apply -f 06-progressive-delivery/manifests/03-canary-90-10.yaml
 
 # 3. Inspect how Envoy compiles the 90/10 weightedClusters in RDS
 TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')

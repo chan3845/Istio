@@ -11,7 +11,7 @@
 - **Engineering Ticket Alignment**: **[Week 01 Ticket `NP-101` & Incident `INC-01`](../fellowship/week-01-platform-onboarding/WEEK.md)**
 - **Learning Objectives**:
   1. Provision a multi-node, multi-zone Kubernetes `v1.36+` cluster using `kind` across `us-east-1a`, `us-east-1b`, and `us-east-1c`.
-  2. Install Istio `1.32.0` using `istioctl` and a production-derived `IstioOperator` CLI manifest alongside Kubernetes Gateway API `v1.6.1` Standard CRDs.
+  2. Install Istio `1.32.0` (`istio-base`, `istiod`, `istio-ingressgateway`, `istio-egressgateway`) using the **official Istio Helm charts** and modular `values.yaml` files alongside Kubernetes Gateway API `v1.6.1` Standard CRDs.
   3. Verify how namespace labels (`istio-injection=enabled`) trigger automatic Envoy `v1.40` sidecar injection.
   4. Deploy the NovaPay `OrderFlow` microservices platform, predict and inspect its multi-hop JSON call graph, and resolve an uninjected workload failure mode.
 
@@ -60,7 +60,7 @@ istio-course-worker3         Ready    <none>          25s   v1.36.0   us-east-1 
 
 ---
 
-## Step 2: Run Pre-Check and Install Istio Control Plane & Gateways
+## Step 2: Run Pre-Check and Install Istio `1.32.0` via Official Helm Charts
 
 Before installing Istio, always verify cluster compatibility with `istioctl x precheck`:
 
@@ -73,15 +73,45 @@ istioctl x precheck
 ✔ No issues found when checking the cluster. Istio is safe to install or upgrade!
 ```
 
-Now install Istio `1.32.0` using our customized `IstioOperator` CLI input specification (or use Helm with [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) in production GitOps pipelines):
+Now install Istio `1.32.0` using the **official Istio Helm charts** (`istio/base`, `istio/istiod`, and `istio/gateway`) and our modular Helm values files in [`00-environment-setup/manifests/`](./manifests/) (note: for production HA clusters, compare [`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml) against [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml)):
 
 ```bash
-istioctl install -f 00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml -y
+# 1. Add and update the official Istio Helm repository
+helm repo add istio https://istio-release.storage.googleapis.com/charts
+helm repo update
+
+# 2. Install istio-base (Cluster-wide CRDs and cluster roles)
+helm upgrade --install istio-base istio/base \
+  -n istio-system --create-namespace \
+  --version 1.32.0 \
+  --set defaultRevision=default \
+  --wait
+
+# 3. Install istiod (Control Plane) using our lab Helm values
+helm upgrade --install istiod istio/istiod \
+  -n istio-system \
+  --version 1.32.0 \
+  -f 00-environment-setup/manifests/helm-values-istiod.yaml \
+  --wait
+
+# 4. Install istio-ingressgateway and istio-egressgateway using the istio/gateway chart
+helm upgrade --install istio-ingressgateway istio/gateway \
+  -n istio-system \
+  --version 1.32.0 \
+  -f 00-environment-setup/manifests/helm-values-ingressgateway.yaml \
+  --wait
+
+helm upgrade --install istio-egressgateway istio/gateway \
+  -n istio-system \
+  --version 1.32.0 \
+  -f 00-environment-setup/manifests/helm-values-egressgateway.yaml \
+  --wait
 ```
 
-Verify that `istiod`, `istio-ingressgateway`, and `istio-egressgateway` are running in `istio-system`:
+Verify the installed Helm releases and confirm that `istiod`, `istio-ingressgateway`, and `istio-egressgateway` are running in `istio-system`:
 
 ```bash
+helm list -n istio-system
 kubectl get pods,svc -n istio-system
 ```
 

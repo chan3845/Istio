@@ -25,7 +25,7 @@ By the end of this lab, you will be able to:
 > **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`  
 > **Fellowship Reference**: **[Week 05: Zero-Trust Security Architecture](../fellowship/week-05-zero-trust-security-architecture/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
 
-- Kubernetes `v1.36+` cluster with Istio `1.32.0` installed and the `orderflow` namespace workloads running, working from the `/home/chan/Documents/Istio` repository root.
+- Kubernetes `v1.36+` cluster with Istio `1.32.0` installed and the `orderflow` namespace workloads running, working from the repository root.
 - Run the pre-flight verification check to confirm your Istio version and verify each workload in `orderflow` uses its dedicated `ServiceAccount` (`frontend-sa`, `order-sa`, `payment-sa`, `inventory-sa`, `toolbox-sa`):
   ```bash
   istioctl version

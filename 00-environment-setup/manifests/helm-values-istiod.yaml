@@ -1,0 +1,75 @@
+# =============================================================================
+# Lab Control Plane Helm Values for Istio 1.32.0 (istio/istiod chart)
+# =============================================================================
+# Install with:
+#   helm repo add istio https://istio-release.storage.googleapis.com/charts
+#   helm repo update
+#   helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default
+#   helm upgrade --install istiod istio/istiod -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-istiod.yaml --wait
+# =============================================================================
+
+profile: default
+
+pilot:
+  autoscaleEnabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  env:
+    PILOT_ENABLE_STATUS: "true"
+    # Native Kubernetes sidecar containers (KEP-753, GA in K8s 1.33+)
+    ENABLE_NATIVE_SIDECARS: "true"
+
+meshConfig:
+  # Enable Envoy access logs to stdout so we can inspect L7 telemetry and Envoy response flags
+  accessLogFile: /dev/stdout
+  accessLogEncoding: TEXT
+  # Default outbound policy starts as ALLOW_ANY; in Module 03 & Module 10 we lock this down to REGISTRY_ONLY
+  outboundTrafficPolicy:
+    mode: ALLOW_ANY
+  enableTracing: true
+  defaultConfig:
+    # Enable DNS capture in pilot-agent so ServiceEntries with resolution: DNS resolve inside the pod
+    proxyMetadata:
+      ISTIO_META_DNS_CAPTURE: "true"
+      ISTIO_META_DNS_AUTO_ALLOCATE: "true"
+    drainDuration: 45s
+    terminationDrainDuration: 5s
+    tracing:
+      # 100% sampling in the lab environment so every curl produces a trace; in production set to 1.0% (see helm-values-prod.yaml)
+      sampling: 100.0
+  extensionProviders:
+    - name: jaeger
+      opentelemetry:
+        service: jaeger-collector.istio-system.svc.cluster.local
+        port: 4317
+    - name: envoy-json-logs
+      envoyFileAccessLog:
+        path: /dev/stdout
+        logFormat:
+          labels:
+            timestamp: "%START_TIME%"
+            client_ip: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            method: "%REQ(:METHOD)%"
+            path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+            protocol: "%PROTOCOL%"
+            response_code: "%RESPONSE_CODE%"
+            response_flags: "%RESPONSE_FLAGS%"
+            bytes_received: "%BYTES_RECEIVED%"
+            bytes_sent: "%BYTES_SENT%"
+            duration_ms: "%DURATION%"
+            upstream_service_time: "%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%"
+            upstream_host: "%UPSTREAM_HOST%"
+            upstream_cluster: "%UPSTREAM_CLUSTER%"
+            x_forwarded_for: "%REQ(X-FORWARDED-FOR)%"
+            user_agent: "%REQ(USER-AGENT)%"
+            request_id: "%REQ(X-REQUEST-ID)%"
+            authority: "%REQ(:AUTHORITY)%"
+            downstream_tls_cipher: "%DOWNSTREAM_TLS_CIPHER%"
+            spiffe_peer: "%DOWNSTREAM_PEER_URI_SAN%"
+

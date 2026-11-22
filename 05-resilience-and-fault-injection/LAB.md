@@ -24,7 +24,7 @@ By the end of this hands-on lab, you will be able to:
 > **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`  
 > **Fellowship Reference**: **[Week 06: Resilience Engineering & Chaos Testing](../fellowship/week-06-resilience-and-chaos-engineering/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
 
-Ensure your Kubernetes `v1.36+` cluster has Istio `1.32.0` installed and the **OrderFlow** base workloads deployed in the `orderflow` namespace with sidecar injection enabled, working from the `/home/chan/Documents/Istio` repository root:
+Ensure your Kubernetes `v1.36+` cluster has Istio `1.32.0` installed and the **OrderFlow** base workloads deployed in the `orderflow` namespace with sidecar injection enabled, working from the repository root:
 
 ```bash
 istioctl version

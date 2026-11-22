@@ -97,7 +97,7 @@ kubectl patch configmap istio -n istio-system --type merge -p '{"data":{"mesh":"
 Apply `telemetry-json-access-logs.yaml` to enable Envoy access logging across `orderflow`:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-json-access-logs.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/telemetry-json-access-logs.yaml
 ```
 
 Send a request from `client-toolbox` to `frontend`:
@@ -144,7 +144,7 @@ Expected output (formatted for readability):
 In high-throughput production services, logging `200 OK` requests wastes storage. Apply `telemetry-error-only-logs.yaml` to `payment-service`:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-error-only-logs.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/telemetry-error-only-logs.yaml
 ```
 
 Test by sending 5 healthy `200 OK` requests to `payment-service:8080`:
@@ -167,7 +167,7 @@ Check `payment-service-v1` logs—notice **zero new `200 OK` access log entries*
 Apply `telemetry-custom-metrics.yaml`, which extracts the HTTP header `x-user-tier` into a new Prometheus label `customer_tier` on `istio_requests_total` (defaulting to `'standard'` when absent):
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-custom-metrics.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/telemetry-custom-metrics.yaml
 ```
 
 ### Step 3.2: Generate Traffic with Custom `x-user-tier` Headers
@@ -201,7 +201,7 @@ istio_requests_total{response_code="200",reporter="destination",source_workload=
 
 Also apply the Golden Signals Prometheus recording and alerting rules in `manifests/promql-golden-signals-rules.yaml`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/promql-golden-signals-rules.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/promql-golden-signals-rules.yaml
 ```
 
 ---
@@ -214,7 +214,7 @@ kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manif
 ### Step 4.1: Enable 100% Trace Sampling in `orderflow`
 Apply `telemetry-distributed-tracing.yaml`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-distributed-tracing.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/telemetry-distributed-tracing.yaml
 ```
 
 ### Step 4.2: Generate Multi-Tier Traffic (`frontend` -> `order-service` -> `payment-service` & `inventory-service`)

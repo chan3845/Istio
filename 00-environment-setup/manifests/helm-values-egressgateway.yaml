@@ -1,0 +1,37 @@
+# =============================================================================
+# Istio Egress Gateway Helm Values (istio/gateway chart)
+# =============================================================================
+# Deploys a dedicated standalone Envoy Egress Gateway in istio-system for
+# controlled external traffic routing & TLS origination (Module 03 & Module 10).
+#
+# Install with:
+#   helm upgrade --install istio-egressgateway istio/gateway -n istio-system --version 1.32.0 \
+#     -f 00-environment-setup/manifests/helm-values-egressgateway.yaml --wait
+# =============================================================================
+
+name: istio-egressgateway
+
+labels:
+  app: istio-egressgateway
+  istio: egressgateway
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  ports:
+    - name: http2
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 8443
+      protocol: TCP
+

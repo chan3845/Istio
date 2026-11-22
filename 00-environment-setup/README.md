@@ -11,7 +11,7 @@
 ### Module Learning Objectives
 By the end of this module, you will be able to:
 1. Explain how multi-node Kubernetes topology labels (`region`, `zone`), CNI plugins (including **Cilium CNI** socket-LB compatibility), and NodePort/LoadBalancer mappings interact with Istio `1.32.0`.
-2. Evaluate Istio `1.32.0` installation methods (**Official Helm Charts** for production GitOps vs. **`istioctl install`** with local `IstioOperator` input) and configuration profiles (`default`, `demo`, `minimal`, `ambient`), explaining why the removed in-cluster `IstioOperator` controller and `profile=demo` are banned in production.
+2. Evaluate Istio `1.32.0` installation methods (**Official Helm Charts** `istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway` vs. **`istioctl install --set`** CLI profiles) and configuration profiles (`default`, `demo`, `minimal`, `ambient`), explaining why `IstioOperator` and `profile=demo` are banned in production.
 3. Deploy and verify the **OrderFlow E-Commerce & Payment Platform**—a multi-tier microservices call graph (`frontend` $\rightarrow$ `order-service` $\rightarrow$ `payment-service` & `inventory-service`) that propagates distributed trace headers and returns structured JSON call trees.
 
 ---
@@ -36,36 +36,39 @@ Isolated `hello-world` containers (`httpbin` or single `nginx` pods) fail to exp
 >
 > *Second: we have two non-negotiable rules in Ticket `NP-101`:*
 > 1. ***Never run `profile=demo` in staging or production.*** *Last year, a team copied `istioctl install --set profile=demo` from a quickstart guide into a staging load-test cluster. Because `demo` sets `100%` trace sampling, unthrottled `/dev/stdout` access logging, and `10m` CPU requests, Envoy saturated node disk I/O and throttled checkout latency from `18ms` to `1,400ms`.*
-> 2. ***Never deploy an in-cluster `IstioOperator` controller.*** *The old in-cluster operator required cluster-wide admin privileges and was **permanently removed in Istio 1.24+**. In Istio `1.32.0`, `kind: IstioOperator` is strictly a local CLI input file for `istioctl install -f`, while production GitOps uses official Istio Helm charts."*
+> 2. ***Never use `IstioOperator` manifests.*** *The old in-cluster `IstioOperator` controller required permanent cluster-admin privileges and was **deprecated in Istio 1.23 and permanently removed in Istio 1.24**. Even passing legacy `kind: IstioOperator` files to `istioctl install -f` is a deprecated anti-pattern. At NovaPay, we install and manage Istio `1.32.0` using the **official Istio Helm charts** (`istio/base`, `istio/istiod`, `istio/gateway`) in both our labs and production GitOps pipelines."*
 
 ---
 
 ## 2. Istio `1.32.0` Installation Methods & Configuration Profiles
 
-### 2.1 Production GitOps (`Helm`) vs. Lab CLI (`istioctl install`)
+### 2.1 Official Helm Charts (Primary Standard) vs. `istioctl install --set`
 
-In Istio `1.32.0`, there are two supported ways to install and upgrade the control plane and data plane components:
+In Istio `1.32.0`, the authoritative installation and lifecycle mechanism is **Helm** (or `istioctl install --set profile=<name>` which renders the exact same underlying Helm charts in memory):
 
 | Installation Method | How It Works | Target Environment |
 | :--- | :--- | :--- |
-| **1. Official Helm Charts (`istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway`)** | Standard Helm charts rendered directly by Helm, ArgoCD, or Flux using a declarative `values.yaml` (see [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml)). | **Recommended Production & GitOps Standard in Istio `1.32.0`.** Integrates natively with enterprise GitOps pipelines and revision-based canary upgrades (`istio.io/rev`). |
-| **2. `istioctl install -f <iop.yaml>`** | The `istioctl` CLI compiles a local `IstioOperator` YAML file (see [`manifests/istio-operator-demo-vs-prod.yaml`](./manifests/istio-operator-demo-vs-prod.yaml)) in memory and applies the resulting Kubernetes manifests directly to the API server. | **Interactive Labs, Rapid Prototyping & CLI-Driven Operations.** |
+| **1. Official Helm Charts (`istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway`)** | Standard Helm charts rendered directly by `helm`, ArgoCD, or Flux using declarative `values.yaml` files (see [`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml) for our lab and [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) for production HA). | **Primary Standard Used in This Fellowship & Production GitOps.** Integrates natively with enterprise GitOps pipelines and revision-based canary upgrades (`istio.io/rev`). |
+| **2. `istioctl install --set profile=<profile>`** | The `istioctl` CLI renders the compiled-in Helm charts using `--set` flags and applies them directly to the API server. | **Quick CLI Sandboxes & Diagnostics.** |
 
 > [!WARNING]
-> **Historical Context — Removal of the In-Cluster `IstioOperator` Controller (Istio 1.24+)**
-> Prior to Istio 1.24, Istio included an optional *in-cluster* `IstioOperator` controller pod that watched `IstioOperator` CRs inside the cluster and mutated the control plane automatically. Because running a privileged controller with cluster-wide RBAC permissions inside the cluster posed severe security and upgrade risks, the in-cluster `IstioOperator` controller was **deprecated in Istio 1.23 and permanently removed in Istio 1.24**.
+> **Legacy / Historical Context — Why `IstioOperator` (`install.istio.io/v1alpha1`) Is Deprecated & Removed**
+> Older Istio tutorials often use `kind: IstioOperator` YAML files. Historically, Istio included an *in-cluster* `IstioOperator` controller pod that watched `IstioOperator` custom resources inside the cluster. Because running a privileged operator with cluster-wide RBAC permissions inside the cluster created severe security and upgrade risks, the in-cluster `IstioOperator` controller was **deprecated in Istio 1.23 and permanently removed in Istio 1.24**.
 >
-> In **Istio `1.32.0`**, `kind: IstioOperator` (`install.istio.io/v1alpha1`) is strictly a **client-side configuration schema consumed by `istioctl install -f`**. For declarative GitOps reconciliation in production, always use the official **Istio Helm charts** ([`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml)).
+> In **Istio `1.32.0`**, you should **never** author `kind: IstioOperator` manifests. Instead, use clean **Helm `values.yaml` files** with the official Istio Helm charts:
+> - [`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml) (Lab Control Plane values)
+> - [`manifests/helm-values-ingressgateway.yaml`](./manifests/helm-values-ingressgateway.yaml) & [`manifests/helm-values-egressgateway.yaml`](./manifests/helm-values-egressgateway.yaml) (Gateway values)
+> - [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) (Production High-Availability Control Plane values)
 
 ### 2.2 Why Installation Profiles Matter: Learning vs. Production
 
-When running `istioctl install` or configuring Helm values, Istio applies a built-in **configuration profile** unless overridden. Choosing the wrong profile in production is one of the most common operational mistakes.
+When configuring Helm values (`profile: default`) or running `istioctl install`, Istio applies a built-in **configuration profile** unless overridden. Choosing the wrong profile in production is one of the most common operational mistakes.
 
 | Profile | Components Installed | Key Defaults & Behavior | Target Environment |
 | :--- | :--- | :--- | :--- |
-| **`default`** | `istiod`, `istio-ingressgateway` (in `istioctl`) | Production-safe defaults, `1%` trace sampling, standard resource requests (`100m` CPU / `128Mi` RAM), no egress gateway. | **Production baseline** (customizable via Helm `values.yaml` or `IstioOperator`). |
+| **`default`** | `istiod` (+ `istio/gateway` via Helm) | Production-safe defaults, `1%` trace sampling, standard resource requests (`100m` CPU / `128Mi` RAM). | **Production baseline** (customizable via Helm `values.yaml`). |
 | **`demo`** | `istiod`, `istio-ingressgateway`, `istio-egressgateway` | `100%` trace sampling, verbose access logging, minimal CPU/memory requests (`10m` CPU / `40Mi` RAM). | **Never use in production.** High trace sampling and tiny resource requests cause severe CPU throttling under load. |
-| **`minimal`** | `istiod` only | Control plane only; gateways are deployed separately as standalone workloads. | **Enterprise GitOps** where gateways are managed by separate teams/namespaces or via Kubernetes Gateway API (`v1.6.1`). |
+| **`minimal`** | `istiod` only | Control plane only; gateways are deployed separately as standalone Helm releases or via Gateway API. | **Enterprise GitOps** where gateways are managed by separate teams/namespaces or via Kubernetes Gateway API (`v1.6.1`). |
 | **`ambient`** | `istiod`, `istio-cni`, `ztunnel` | Enables sidecarless Ambient Data Plane mode (`ztunnel` L4 DaemonSet + `istio-cni`). | **Ambient Mesh deployments** (covered in [Module 01 Lesson 04](../01-architecture-and-internals/lessons/04-ambient-mode-ztunnel-and-waypoints.md)). |
 
 ### 2.3 Cilium CNI Compatibility Requirements (Istio `1.32.0` Sidecar & Ambient Modes)
@@ -76,7 +79,7 @@ If your Kubernetes `v1.36+` cluster runs **Cilium CNI** (especially with eBPF `k
 2. **`socketLB.hostNamespaceOnly=true`**: Restricts Cilium's eBPF socket-level load balancing (`bpf_sockaddr`) to the host network namespace only. Without this setting, Cilium rewrites Service ClusterIPs inside the pod's socket layer *before* packets ever reach Envoy (`:15001`) or `ztunnel` (`:15008`), breaking Istio mTLS, L7 routing, and Ambient HBONE tunnels!
 
 ### Our Engineering Approach
-Instead of blindly installing `--set profile=demo`, we provide both a production Helm configuration in [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) and a customized `default`-derived `IstioOperator` specification in [`manifests/istio-operator-demo-vs-prod.yaml`](./manifests/istio-operator-demo-vs-prod.yaml) that explicitly configures each setting (`accessLogFile`, `ISTIO_META_DNS_CAPTURE`, `extensionProviders`, `egressGateways`) so you see exactly which knobs control Istio's runtime behavior.
+Instead of blindly installing `profile=demo` or using deprecated `IstioOperator` YAML files, we install Istio `1.32.0` using the **official Istio Helm charts** with explicit, modular Helm values files ([`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml), [`manifests/helm-values-ingressgateway.yaml`](./manifests/helm-values-ingressgateway.yaml), [`manifests/helm-values-egressgateway.yaml`](./manifests/helm-values-egressgateway.yaml), and [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml)) so you see the exact Helm chart architecture used in modern production clusters.
 
 ---
 
@@ -157,16 +160,15 @@ flowchart LR
 
 Test your understanding before moving to the hands-on lab.
 
-### Question 1: In-Cluster `IstioOperator` vs. Helm in Istio `1.32.0`
-A backend engineer opens a Pull Request to install Istio `1.32.0` in NovaPay's production cluster by committing a `kind: IstioOperator` YAML resource directly into ArgoCD, expecting an in-cluster operator to reconcile it. What happens when ArgoCD tries to apply this resource, and what is the correct architecture?
+### Question 1: Legacy `IstioOperator` vs. Official Helm Charts in Istio `1.32.0`
+A backend engineer copies a `kind: IstioOperator` YAML file from an old tutorial and opens a Pull Request to deploy Istio `1.32.0` via ArgoCD, expecting an in-cluster operator to reconcile it. Why does Alex reject this PR, and what is the correct installation architecture?
 
 <details>
 <summary>Check Answer & Engineering Explanation</summary>
 
 **Answer:**
-The deployment will fail (or the resource will sit inert if an old CRD exists) because the **in-cluster `IstioOperator` controller was deprecated in Istio 1.23 and permanently removed in Istio 1.24**.
-- In Istio `1.32.0`, `kind: IstioOperator` (`install.istio.io/v1alpha1`) is strictly a **client-side CLI input schema** parsed in memory by `istioctl install -f`.
-- For declarative GitOps reconciliation in ArgoCD or Flux, NovaPay must use the official **Istio Helm charts** (`istio/base`, `istio/istiod`, `istio/cni`, `istio/gateway`) with declarative `values.yaml` files (as shown in [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml)).
+The **in-cluster `IstioOperator` controller was deprecated in Istio 1.23 and permanently removed in Istio 1.24**, and `kind: IstioOperator` manifests are legacy artifacts that should not be used in modern Istio deployments.
+- For both local installations and declarative GitOps reconciliation in ArgoCD or Flux, NovaPay uses the official **Istio Helm charts** (`istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway`) with standard Helm `values.yaml` files ([`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml) and [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml)).
 </details>
 
 ### Question 2: Cilium CNI eBPF Socket Load Balancing Conflict
@@ -196,7 +198,7 @@ In Istio, workload identity is **not** based on Pod IP or Deployment labels (`ap
 ## 5. Key Takeaways, Definition of Done & Authoritative References
 
 ### Key Takeaways
-- **`IstioOperator` is a CLI schema, not an in-cluster controller**: Use `istioctl install -f` for interactive lab clusters and official **Istio Helm charts** for production GitOps.
+- **Install Istio with Official Helm Charts (`istio/base`, `istio/istiod`, `istio/gateway`)**: Do not use deprecated `IstioOperator` manifests; use declarative Helm `values.yaml` files for both lab and production GitOps environments.
 - **Never run `profile=demo` in production**: Its `100%` trace sampling and `10m` CPU requests cause severe proxy throttling under load.
 - **Identity starts at the `ServiceAccount` and L7 starts at Port Naming**: Dedicated `ServiceAccounts` establish cryptographic SPIFFE identities, and `http-*`/`grpc-*` port names enable deterministic L7 processing.
 

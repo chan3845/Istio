@@ -715,7 +715,7 @@ Congratulations on completing the 10-Week **Istio Service Mesh Engineering Fello
 
 - [ ] **Run the Automated Capstone Grader**:
   ```bash
-  cd /home/chan/Documents/Istio/10-capstone-project
+  cd 10-capstone-project
   ./verify-capstone.sh
   ```
 - [ ] **Confirm 100% Pass Across All 6 Pillars**:

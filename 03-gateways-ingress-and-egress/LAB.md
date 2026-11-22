@@ -25,8 +25,8 @@ By the end of this lab, you will be able to:
 > **Version Baseline (November 2026)**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` | Gateway API `v1.6.1`  
 > **Fellowship Reference**: **[Week 04: Edge Gateways & Controlled Egress](../fellowship/week-04-edge-gateways-and-controlled-egress/WEEK.md)** | [`../VERSIONS.md`](../VERSIONS.md)
 
-- Kubernetes `v1.36+` cluster with `istiod` (`1.32.0`), `istio-ingressgateway`, and `istio-egressgateway` installed in `istio-system`, working from the `/home/chan/Documents/Istio` repository root.
-  *(If `istio-egressgateway` is not yet deployed in `istio-system`, enable it via `istioctl install -f 00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml -y` or `--set components.egressGateways[0].name=istio-egressgateway --set components.egressGateways[0].enabled=true`).*
+- Kubernetes `v1.36+` cluster with `istiod` (`1.32.0`), `istio-ingressgateway`, and `istio-egressgateway` installed via Helm in `istio-system`.
+  *(If `istio-egressgateway` is not yet deployed in `istio-system`, install it via `helm upgrade --install istio-egressgateway istio/gateway -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-egressgateway.yaml --wait`).*
 - Run the pre-flight verification check to confirm gateway pods and Gateway API `v1.6.1` CRDs:
   ```bash
   istioctl version

@@ -85,7 +85,7 @@ flowchart LR
 Apply `01-mirroring-shadow.yaml`, which routes 100% of live traffic to `payment-service` subset `v1` while asynchronously mirroring 100% of requests to subset `v2`:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/01-mirroring-shadow.yaml
+kubectl apply -f 06-progressive-delivery/manifests/01-mirroring-shadow.yaml
 ```
 
 Inspect the Envoy route configuration inside `client-toolbox` to verify the `requestMirrorPolicies` stanza:
@@ -155,7 +155,7 @@ Even if `payment-service-v2` returns an error during mirroring, the client never
 Apply `02-dark-launch-header.yaml`, which routes requests with `x-qa-release: v2` to `subset: v2` and all other requests to `subset: v1`:
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/02-dark-launch-header.yaml
+kubectl apply -f 06-progressive-delivery/manifests/02-dark-launch-header.yaml
 ```
 
 ### Step 2.2: Validate Public Traffic vs. QA Header Traffic
@@ -203,7 +203,7 @@ Expected output (`100%` hit `payment-service-v2`):
 ### Step 3.1: Stage 1 — Shift 10% of Public Traffic to `v2` (`90/10`)
 Apply `03-canary-90-10.yaml`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/03-canary-90-10.yaml
+kubectl apply -f 06-progressive-delivery/manifests/03-canary-90-10.yaml
 ```
 
 Run a 100-request distribution test from `client-toolbox` and count how many responses come from `v1` vs `v2`:
@@ -224,7 +224,7 @@ Expected output (~90 requests to `v1`, ~10 requests to `v2`):
 ### Step 3.2: Stage 2 — Shift 50% of Public Traffic to `v2` (`50/50`)
 Apply `04-canary-50-50.yaml`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/04-canary-50-50.yaml
+kubectl apply -f 06-progressive-delivery/manifests/04-canary-50-50.yaml
 ```
 
 Run the 100-request distribution counter again:
@@ -245,7 +245,7 @@ Expected output (~50 requests to `v1`, ~50 requests to `v2`):
 ### Step 3.3: Stage 3 — Complete Promotion to `100% v2`
 Apply `05-canary-100-v2-and-rollback.yaml`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/05-canary-100-v2-and-rollback.yaml
+kubectl apply -f 06-progressive-delivery/manifests/05-canary-100-v2-and-rollback.yaml
 ```
 
 Verify that all 20 requests now hit `payment-service-v2`:
@@ -285,7 +285,7 @@ Output: `HTTP Status: 500`
 Because `payment-service-v1` is still running and warm in the cluster, we do **not** need to wait for container restarts or `kubectl rollout undo`. Simply re-apply `02-dark-launch-header.yaml` (which routes 100% of public traffic back to `v1`):
 
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/02-dark-launch-header.yaml
+kubectl apply -f 06-progressive-delivery/manifests/02-dark-launch-header.yaml
 ```
 
 Immediately verify that public traffic is 100% restored to `200 OK` on `payment-service-v1`:

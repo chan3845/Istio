@@ -51,7 +51,7 @@ By the end of Week 01, you will be able to:
 > Morning team. For the `orderflow` staging environment spin-up today, why aren't we just running `istioctl install --set profile=demo` or dropping an `IstioOperator` CRD into the cluster so ArgoCD can reconcile it? That's what I used at my last company back on Istio 1.18.
 
 > **Alex Morgan (Senior Platform Engineer)** `09:17 AM`
-> Two big reasons, Daniel. First, the in-cluster `IstioOperator` controller was deprecated ages ago and **completely removed** in recent Istio releases—in `1.32.0`, passing `-f iop.yaml` to `istioctl install` only works as a client-side CLI config schema, not an in-cluster operator. For GitOps in production, we use the official Istio Helm charts (`istio/base`, `istio/istiod`, `istio/gateway`). For local deterministic lab clusters, we use `istioctl install` with explicit settings.
+> Two big reasons, Daniel. First, `IstioOperator` is legacy—the in-cluster `IstioOperator` controller was deprecated in 1.23 and **permanently removed** in 1.24. At NovaPay, we do not author `kind: IstioOperator` manifests at all; we install and manage Istio `1.32.0` using the **official Istio Helm charts** (`istio/base`, `istio/istiod`, `istio/gateway`) with clean, modular `values.yaml` files in both our local lab clusters and our production ArgoCD GitOps pipelines.
 >
 > Second, `profile=demo` is a ticking time bomb for any realistic workload. It sets `meshConfig.accessLogFile=/dev/stdout` unthrottled, sets trace sampling to `100%` (`PILOT_TRACE_SAMPLING=100`), and drops Envoy CPU/memory requests to miniature values. Under NovaPay load, `100%` trace sampling alone will saturate `istio-proxy` CPU and blow our checkout P99.
 
@@ -105,8 +105,9 @@ Read the complete architectural reference and manifest breakdowns in Module 00:
 - **Core Module Reference**: [**Module 00 — Environment Setup & Lab Topology (`README.md`)**](../../00-environment-setup/README.md)
 - **Reference Cluster & Baseline Manifests**:
   - [Multi-Zone Kind Cluster Topology (`kind-cluster.yaml`)](../../00-environment-setup/manifests/kind-cluster.yaml)
-  - [Production vs. Demo Profile Comparison (`istio-operator-demo-vs-prod.yaml`)](../../00-environment-setup/manifests/istio-operator-demo-vs-prod.yaml)
-  - [Production GitOps Helm Values (`helm-values-prod.yaml`)](../../00-environment-setup/manifests/helm-values-prod.yaml)
+  - [Lab Control Plane Helm Values (`helm-values-istiod.yaml`)](../../00-environment-setup/manifests/helm-values-istiod.yaml)
+  - [Ingress & Egress Gateway Helm Values (`helm-values-ingressgateway.yaml` & `helm-values-egressgateway.yaml`)](../../00-environment-setup/manifests/helm-values-ingressgateway.yaml)
+  - [Production HA GitOps Helm Values (`helm-values-prod.yaml`)](../../00-environment-setup/manifests/helm-values-prod.yaml)
   - [OrderFlow Reference Workloads (`base-platform.yaml`)](../../00-environment-setup/manifests/base-platform.yaml)
 
 ### Alex's Guided Study Notes: What to Pay Attention to Under the Hood

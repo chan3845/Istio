@@ -37,8 +37,8 @@ To eliminate cognitive overload while preserving full engineering depth, Modules
 - **Kubernetes Gateway API**: Upgraded Gateway API installation manifests and labs from `v1.2.0` to **`v1.6.1`** (`standard-install.yaml`), incorporating the graduation of `TCPRoute` and `UDPRoute` to the `v1` Standard channel and Istio `1.32`'s support for `AuthorizationPolicy` `targetRefs` pointing to `HTTPRoute`.
 - **CNI Compatibility Governance**: Added explicit **Cilium (`v1.18+`/`v1.19+`)** compatibility requirements (`cni.exclusive=false` and `socketLB.hostNamespaceOnly=true` when `kubeProxyReplacement=true`).
 
-### 2. Installation & API Modernization
-- **Removed In-Cluster `IstioOperator` References**: Clarified across Module 00 and Module 08 that the *in-cluster* Istio Operator controller was deprecated in `1.23` and removed in `1.24`. Added modern **Helm values (`helm-values-prod.yaml`)** alongside local CLI `istioctl install` configurations.
+### 2. Installation & API Modernization (100% Official Helm Charts — Zero `IstioOperator` Manifests)
+- **Eliminated Deprecated `IstioOperator` Manifests**: Removed all `kind: IstioOperator` (`install.istio.io/v1alpha1`) YAML manifests (`istio-operator-demo-vs-prod.yaml` and `production-istiod-ha-iop.yaml`) and replaced all installation and canary control-plane upgrade labs with the **official Istio Helm charts** (`istio/base`, `istio/istiod`, `istio/gateway`) and modular Helm `values.yaml` files (`helm-values-istiod.yaml`, `helm-values-ingressgateway.yaml`, `helm-values-egressgateway.yaml`, `helm-values-prod.yaml`, and `production-istiod-ha-helm-values.yaml`).
 - **Standardized `v1` Istio CRDs**: Verified that all 49 YAML manifests use `networking.istio.io/v1`, `security.istio.io/v1`, `telemetry.istio.io/v1`, and `gateway.networking.k8s.io/v1`.
 - **Addon & Sample URLs**: Updated observability addon references (`prometheus`, `jaeger`, `grafana`, `kiali`) and JWKS sample URLs from `release-1.24` to `release-1.32`.
 

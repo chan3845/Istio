@@ -151,7 +151,7 @@ Test custom metric tag extraction and CEL access log filtering on `payment-servi
 
 ```bash
 # 1. Apply custom metrics Telemetry resource in orderflow
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-custom-metrics.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/telemetry-custom-metrics.yaml
 
 # 2. Send a request carrying the x-user-tier: enterprise header
 TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')

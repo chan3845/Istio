@@ -130,7 +130,7 @@ Apply the distributed tracing `Telemetry` policy and inspect how `frontend` fans
 
 ```bash
 # 1. Apply 100% trace sampling and custom trace tags in orderflow
-kubectl apply -f /home/chan/Documents/Istio/07-observability-and-telemetry/manifests/telemetry-distributed-tracing.yaml
+kubectl apply -f 07-observability-and-telemetry/manifests/telemetry-distributed-tracing.yaml
 
 # 2. Send a multi-tier request from client-toolbox to frontend with x-user-tier: enterprise
 TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')

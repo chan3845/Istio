@@ -149,14 +149,14 @@ Use these commands in your cluster (and during [LAB.md](../LAB.md)) to inspect h
 
 ```bash
 # 1. Inspect the mirroring manifest and apply it to orderflow
-kubectl apply -f /home/chan/Documents/Istio/06-progressive-delivery/manifests/01-mirroring-shadow.yaml
+kubectl apply -f 06-progressive-delivery/manifests/01-mirroring-shadow.yaml
 
 # 2. Verify that Envoy compiled the requestMirrorPolicies block on client-toolbox's port 8080 RDS route
 TOOLBOX_POD=$(kubectl get pod -n orderflow -l app=client-toolbox -o jsonpath='{.items[0].metadata.name}')
 istioctl proxy-config routes "$TOOLBOX_POD" -n orderflow --name 8080 -o json | grep -A 12 "requestMirrorPolicies"
 
 # 3. Inspect the Dark Launch manifest to see top-to-bottom route ordering
-cat /home/chan/Documents/Istio/06-progressive-delivery/manifests/02-dark-launch-header.yaml
+cat 06-progressive-delivery/manifests/02-dark-launch-header.yaml
 ```
 
 ---

@@ -29,7 +29,9 @@ Every Istio configuration manifest in this repository uses the **stable `v1` API
 | **`security.istio.io/v1`** | `v1` | `PeerAuthentication`, `RequestAuthentication`, `AuthorizationPolicy` | **GA / Stable** (Includes Istio `1.32` support for targeting Gateway API `HTTPRoute` via `targetRefs`). |
 | **`telemetry.istio.io/v1`** | `v1` | `Telemetry` | **GA / Stable** (Replaces legacy `meshConfig` metric/trace patching and `EnvoyFilter` telemetry hacks). |
 | **`gateway.networking.k8s.io/v1`** | `v1` | `GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, `TCPRoute`, `UDPRoute` | **GA / Standard Channel (`v1.6.1`)** (`TCPRoute` and `UDPRoute` graduated to Standard in Gateway API `v1.6`). |
-| **`install.istio.io/v1alpha1`** | `v1alpha1` | `IstioOperator` *(CLI input only)* | **Local CLI Input Only**. The *in-cluster* Istio Operator controller was deprecated in `1.23` and removed in `1.24`. Passing `-f IstioOperator.yaml` to `istioctl install` remains supported for local CLI rendering, while **Helm** is recommended for production GitOps. |
+
+> **Deprecated / Removed API Notice (`IstioOperator`)**:
+> The in-cluster `IstioOperator` controller (`install.istio.io/v1alpha1`) was deprecated in Istio `1.23` and permanently removed in Istio `1.24`. This fellowship uses **zero** `kind: IstioOperator` manifests; all control-plane and gateway installations use the **official Istio Helm charts** (`istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway`) with declarative Helm `values.yaml` files.
 
 ---
 

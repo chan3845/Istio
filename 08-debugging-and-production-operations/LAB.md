@@ -50,7 +50,7 @@ Expected output: `HTTP Status: 200`
 ### 1. Inject the Outage
 A developer just pushed an emergency canary routing update for `payment-service`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-1-broken-subset-nr.yaml
+kubectl apply -f 08-debugging-and-production-operations/manifests/scenario-1-broken-subset-nr.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -124,7 +124,7 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
 ### 1. Inject the Outage
 Maya Patel's security team enabled `STRICT` mTLS on `payment-service`, while an application team simultaneously applied their own `DestinationRule`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-2-mtls-conflict-uf.yaml
+kubectl apply -f 08-debugging-and-production-operations/manifests/scenario-2-mtls-conflict-uf.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -195,7 +195,7 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
 ### 1. Inject the Outage
 An engineer copied a `DestinationRule` snippet from a blog post without adjusting connection pool thresholds for production concurrency:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-3-aggressive-cb-uo.yaml
+kubectl apply -f 08-debugging-and-production-operations/manifests/scenario-3-aggressive-cb-uo.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -265,7 +265,7 @@ kubectl patch destinationrule payment-service-dr -n orderflow --type='merge' \
 ### 1. Inject the Outage
 To optimize Envoy memory usage, a platform engineer deployed a `Sidecar` CRD for `order-service`:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-4-sidecar-egress-blackhole.yaml
+kubectl apply -f 08-debugging-and-production-operations/manifests/scenario-4-sidecar-egress-blackhole.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -332,7 +332,7 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
 ### 1. Inject the Outage
 Someone updated the `inventory-service` Kubernetes `Service` manifest:
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-5-wrong-port-protocol.yaml
+kubectl apply -f 08-debugging-and-production-operations/manifests/scenario-5-wrong-port-protocol.yaml
 ```
 
 ### 2. Observe the Symptom
@@ -389,10 +389,10 @@ kubectl get svc inventory-service -n orderflow -o yaml
 kubectl patch service inventory-service -n orderflow --type='json' \
   -p='[{"op": "replace", "path": "/spec/ports/0/name", "value": "http-inventory"}, {"op": "replace", "path": "/spec/ports/0/appProtocol", "value": "http"}]'
 
-kubectl delete -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-1-broken-subset-nr.yaml \
-               -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-2-mtls-conflict-uf.yaml \
-               -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-3-aggressive-cb-uo.yaml \
-               -f /home/chan/Documents/Istio/08-debugging-and-production-operations/manifests/scenario-4-sidecar-egress-blackhole.yaml --ignore-not-found
+kubectl delete -f 08-debugging-and-production-operations/manifests/scenario-1-broken-subset-nr.yaml \
+               -f 08-debugging-and-production-operations/manifests/scenario-2-mtls-conflict-uf.yaml \
+               -f 08-debugging-and-production-operations/manifests/scenario-3-aggressive-cb-uo.yaml \
+               -f 08-debugging-and-production-operations/manifests/scenario-4-sidecar-egress-blackhole.yaml --ignore-not-found
 
 kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
   curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://frontend.orderflow.svc.cluster.local/
@@ -405,12 +405,19 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
 
 Now that the `orderflow` platform is healthy, you will perform a zero-downtime canary control plane upgrade by running a second `istiod` revision (`1-32-canary`) alongside the default control plane, migrating `orderflow` workloads to it gradually, and verifying cross-revision mTLS connectivity.
 
-### Step 1: Install the Canary Control Plane Revision (`1-32-canary`)
+### Step 1: Install the Canary Control Plane Revision (`1-32-canary`) via Helm
+Install a second, isolated `istiod` revision (`istiod-1-32-canary`) using the official `istio/istiod` Helm chart (see [`manifests/production-istiod-ha-helm-values.yaml`](./manifests/production-istiod-ha-helm-values.yaml) for the full production HA Helm values specification):
 ```bash
-istioctl install --set revision=1-32-canary --set profile=default -y
+helm upgrade --install istiod-1-32-canary istio/istiod \
+  -n istio-system \
+  --version 1.32.0 \
+  --set revision=1-32-canary \
+  --set profile=default \
+  --wait
 ```
-Verify that two `istiod` deployments now run side-by-side in `istio-system`:
+Verify that two `istiod` Helm releases and deployments now run side-by-side in `istio-system`:
 ```bash
+helm list -n istio-system
 kubectl get deployments,svc -n istio-system -l app=istiod
 istioctl tag list
 kubectl get mutatingwebhookconfigurations | grep istio
@@ -450,10 +457,10 @@ istioctl proxy-status
 ```
 
 ### Lab Cleanup Procedure
-Restore the cluster to the standard single-revision state before Module 10 and uninstall the temporary `1-32-canary` revision:
+Restore the cluster to the standard single-revision state before Module 10 and uninstall the temporary `istiod-1-32-canary` Helm release:
 ```bash
 kubectl label namespace orderflow istio.io/rev- istio-injection=enabled --overwrite
 kubectl rollout restart deployment -n orderflow
 kubectl rollout status deployment -n orderflow
-istioctl uninstall --revision=1-32-canary -y
+helm uninstall istiod-1-32-canary -n istio-system
 ```

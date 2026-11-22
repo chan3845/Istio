@@ -156,12 +156,12 @@ kubectl create secret tls novapay-tls-cert -n istio-system \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 2. Apply namespaces and Sidecar isolation boundaries
-kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/01-namespaces-and-sidecars.yaml
+kubectl apply -f 10-capstone-project/manifests/01-namespaces-and-sidecars.yaml
 ```
 
 ### Step 2: Deploy All NovaPay & PCI Vault Workloads
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/02-workloads.yaml
+kubectl apply -f 10-capstone-project/manifests/02-workloads.yaml
 
 # Wait for all deployments in novapay and novapay-pci to become Ready (2/2)
 kubectl rollout status deployment -n novapay --timeout=120s
@@ -170,22 +170,22 @@ kubectl rollout status deployment -n novapay-pci --timeout=120s
 
 ### Step 3: Apply Zero-Trust Security Policies (`STRICT` mTLS, Default-Deny, SPIFFE RBAC, & JWT)
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/03-zero-trust-security.yaml
+kubectl apply -f 10-capstone-project/manifests/03-zero-trust-security.yaml
 ```
 
 ### Step 4: Apply North-South Ingress Gateway & Egress TLS Origination
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/04-ingress-egress-gateways.yaml
+kubectl apply -f 10-capstone-project/manifests/04-ingress-egress-gateways.yaml
 ```
 
 ### Step 5: Apply Resilience Policies, Canary Routing & Traffic Mirroring
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/05-resilience-and-routing.yaml
+kubectl apply -f 10-capstone-project/manifests/05-resilience-and-routing.yaml
 ```
 
 ### Step 6: Apply Production Telemetry Configuration
 ```bash
-kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/06-telemetry-and-observability.yaml
+kubectl apply -f 10-capstone-project/manifests/06-telemetry-and-observability.yaml
 ```
 
 ---
@@ -195,8 +195,8 @@ kubectl apply -f /home/chan/Documents/Istio/10-capstone-project/manifests/06-tel
 Run the automated Capstone Verification Script to validate all 6 production architecture pillars end-to-end:
 
 ```bash
-chmod +x /home/chan/Documents/Istio/10-capstone-project/verify-capstone.sh
-/home/chan/Documents/Istio/10-capstone-project/verify-capstone.sh
+chmod +x 10-capstone-project/verify-capstone.sh
+10-capstone-project/verify-capstone.sh
 ```
 
 ### What `verify-capstone.sh` Validates Automatically:
