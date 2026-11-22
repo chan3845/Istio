@@ -48,7 +48,7 @@ In Istio `1.32.0`, the authoritative installation and lifecycle mechanism is **H
 
 | Installation Method | How It Works | Target Environment |
 | :--- | :--- | :--- |
-| **1. Official Helm Charts (`istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway`)** | Standard Helm charts rendered directly by `helm`, ArgoCD, or Flux using declarative `values.yaml` files (see [`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml) for our lab and [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) for production HA). | **Primary Standard Used in This Fellowship & Production GitOps.** Integrates natively with enterprise GitOps pipelines and revision-based canary upgrades (`istio.io/rev`). |
+| **1. Official Helm Charts (`istio/base`, `istio/istiod`, `istio/cni`, `istio/ztunnel`, `istio/gateway`)** | Standard Helm charts hosted at **`https://blob.istio.io/istio-release/charts`** (replacing the decommissioned GCP bucket `istio-release.storage.googleapis.com/charts`), rendered by `helm`, ArgoCD, or Flux using declarative `values.yaml` files (see [`manifests/helm-values-istiod.yaml`](./manifests/helm-values-istiod.yaml) for our lab and [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) for production HA). | **Primary Standard Used in This Fellowship & Production GitOps.** Integrates natively with enterprise GitOps pipelines and revision-based canary upgrades (`istio.io/rev`). |
 | **2. `istioctl install --set profile=<profile>`** | The `istioctl` CLI renders the compiled-in Helm charts using `--set` flags and applies them directly to the API server. | **Quick CLI Sandboxes & Diagnostics.** |
 
 > [!WARNING]

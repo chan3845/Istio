@@ -14,7 +14,7 @@ This document establishes the authoritative software version baseline for the **
 | **Kubernetes Gateway API** | **`v1.6.1`** (`standard-install.yaml`) | Latest Stable Standard Channel | Declarative North-South ingress (`GatewayClass`, `Gateway`, `HTTPRoute`, `GRPCRoute`, `TCPRoute`, `UDPRoute`) and Ambient Waypoint provisioning. |
 | **Cilium CNI** *(when used)* | **`1.18+` / `1.19+`** | Stable Production CNI | eBPF CNI. Requires `cni.exclusive=false` and `socketLB.hostNamespaceOnly=true` when `kubeProxyReplacement=true`. |
 | **Kind (Local Cluster)** | **`v0.33.0+`** | Stable Local Lab Runtime | Multi-node local Kubernetes cluster for executing fellowship labs. |
-| **Helm** | **`v3.16+`** | Stable Package Manager | Recommended production and GitOps installation mechanism for Istio charts (`base`, `istiod`, `cni`, `ztunnel`, `gateway`). |
+| **Helm** | **`v3.16+`** | Stable Package Manager | Primary installation mechanism for official Istio charts (`https://blob.istio.io/istio-release/charts` — note that the legacy `istio-release.storage.googleapis.com/charts` bucket is decommissioned). |
 | **Reference App (`fake-service`)** | **`v0.26.2`** | Stable Benchmark Workload | Simulates NovaPay's `orderflow` and `novapay` multi-tier HTTP/gRPC services with automatic W3C `traceparent` and B3 header propagation. |
 
 ---

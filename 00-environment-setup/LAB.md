@@ -77,7 +77,9 @@ Now install Istio `1.32.0` using the **official Istio Helm charts** (`istio/base
 
 ```bash
 # 1. Add and update the official Istio Helm repository
-helm repo add istio https://istio-release.storage.googleapis.com/charts
+# (Note: The legacy GCP bucket istio-release.storage.googleapis.com/charts is decommissioned;
+#  always use the current official endpoint https://blob.istio.io/istio-release/charts)
+helm repo add istio https://blob.istio.io/istio-release/charts --force-update
 helm repo update
 
 # 2. Install istio-base (Cluster-wide CRDs and cluster roles)

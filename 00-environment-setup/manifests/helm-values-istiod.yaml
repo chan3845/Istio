@@ -2,7 +2,7 @@
 # Lab Control Plane Helm Values for Istio 1.32.0 (istio/istiod chart)
 # =============================================================================
 # Install with:
-#   helm repo add istio https://istio-release.storage.googleapis.com/charts
+#   helm repo add istio https://blob.istio.io/istio-release/charts --force-update
 #   helm repo update
 #   helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default
 #   helm upgrade --install istiod istio/istiod -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-istiod.yaml --wait
