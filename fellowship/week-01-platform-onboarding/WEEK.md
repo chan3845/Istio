@@ -9,7 +9,7 @@
 > [!NOTE]
 > ### Where You Are & What You Need Before Starting
 > - **Current Phase**: Phase 1 — Foundations & Data Plane Internals (Week 01 of 10)
-> - **Prerequisites**: Docker (`27.x+`), `kind` (`v0.27+`), `kubectl` (`1.36+`), `istioctl` (`1.32.0`), `helm` (`3.17+`), `jq`, and `openssl` installed locally
+> - **Prerequisites**: Docker (`27.x+`), `kind` (`v0.27+`), `kubectl` (`1.36+`), `istioctl` (`1.32.0`), `helm` (`v3.16+` or `v4.x`, including `4.3.x`), `jq`, and `openssl` installed locally
 > - **Estimated Time**: ~6–8 hours (Monday Briefing through Sunday Assessment)
 > - **Tangible Weekly Deliverable**: Running 4-node multi-zone `istio-course` cluster with Istio `1.32.0`, Gateway API `v1.6.1`, enrolled `orderflow` baseline workloads (`2/2 READY`), and onboarded `currency-service-v1` (`NP-101`)
 
@@ -124,7 +124,7 @@ While reading Module 00, focus closely on these three production engineering rea
 
 | Profile / Method | Components Installed | Default Telemetry & Sampling | Resource Footprint | NovaPay Production Verdict |
 | :--- | :--- | :--- | :--- | :--- |
-| **`default` Profile** (`istioctl` / Helm) | `istiod`, `istio-ingressgateway` | No stdout access log by default; `1%` trace sampling | Production-ready defaults (`100m` CPU / `128Mi` RAM per proxy) | **Approved** (via Helm in GitOps; via `istioctl` with explicit overrides in lab) |
+| **`default` Profile** (Built into `istio/istiod` `values.yaml` — omit `profile` in Helm) | `istiod` (+ `istio/gateway` chart) | No stdout access log by default; `1%` trace sampling | Production-ready defaults (`100m` CPU / `128Mi` RAM per proxy) | **Approved** (Omit `profile` in Helm `values.yaml` because `values.yaml` *is* the default profile; setting `profile: default` fails in `zzz_profile.yaml`) |
 | **`demo` Profile** | `istiod`, `istio-ingressgateway`, `istio-egressgateway` | Stdout access logging on; **`100%` trace sampling** | Artificially low (`10m` CPU / `40Mi` RAM requests) | **Banned in Prod/Staging** — Causes severe Envoy CPU exhaustion and disk I/O saturation under load |
 | **`minimal` Profile** | `istiod` only (zero gateways) | Standard defaults | Minimal control plane only | **Approved** when using pure Kubernetes Gateway API where gateways are deployed dynamically per `Gateway` CR |
 | **`ambient` Profile** | `istiod`, `istio-cni`, `ztunnel` DaemonSet | L4 telemetry at `ztunnel`; optional L7 at Waypoint | Shared per-node L4 proxy | **Evaluated in Week 02** for high-density batch workloads |

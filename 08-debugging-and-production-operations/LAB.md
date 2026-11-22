@@ -406,13 +406,12 @@ kubectl exec -n orderflow deploy/client-toolbox -c curl -- \
 Now that the `orderflow` platform is healthy, you will perform a zero-downtime canary control plane upgrade by running a second `istiod` revision (`1-32-canary`) alongside the default control plane, migrating `orderflow` workloads to it gradually, and verifying cross-revision mTLS connectivity.
 
 ### Step 1: Install the Canary Control Plane Revision (`1-32-canary`) via Helm
-Install a second, isolated `istiod` revision (`istiod-1-32-canary`) using the official `istio/istiod` Helm chart (see [`manifests/production-istiod-ha-helm-values.yaml`](./manifests/production-istiod-ha-helm-values.yaml) for the full production HA Helm values specification):
+Install a second, isolated `istiod` revision (`istiod-1-32-canary`) using the official `istio/istiod` Helm chart (see [`manifests/production-istiod-ha-helm-values.yaml`](./manifests/production-istiod-ha-helm-values.yaml) for the full production HA Helm values specification; note that we omit `profile` so `zzz_profile.yaml` uses the chart's built-in default profile):
 ```bash
 helm upgrade --install istiod-1-32-canary istio/istiod \
   -n istio-system \
   --version 1.32.0 \
   --set revision=1-32-canary \
-  --set profile=default \
   --wait
 ```
 Verify that two `istiod` Helm releases and deployments now run side-by-side in `istio-system`:

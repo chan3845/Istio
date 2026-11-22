@@ -1,52 +1,67 @@
 # =============================================================================
-# Production-Grade Helm Values for Istio 1.32.0 (istiod chart)
+# Production-Grade Helm Values for Istio 1.32.0 (istio/istiod chart)
 # =============================================================================
 # Authoritative Version Baseline (November 2026):
 #   - Istio Control Plane & Data Plane: 1.32.0 (Envoy v1.40)
 #   - Kubernetes Supported Window:      v1.33 - v1.37 (Baseline: v1.36 / v1.37)
 #   - Gateway API Standard Channel:     v1.6.1
+#   - Helm CLI Compatibility:           Helm 3 (v3.16+) & Helm 4 (v4.3.x)
+#
+# NOTE ON HELM PROFILES:
+# Omit `profile` (or leave empty) to use the chart's built-in default sidecar
+# profile (`_internal_defaults_do_not_set`). Do NOT set `profile: default`
+# (which fails in `zzz_profile.yaml` because no `files/profile-default.yaml`
+# overlay file exists) and do NOT set `profile: stable` unless you specifically
+# want experimental `stableValidationPolicy: true`.
 #
 # Installation Commands (Recommended Production / GitOps Standard):
 #   1. helm repo add istio https://blob.istio.io/istio-release/charts --force-update
 #      helm repo update
-#   2. helm install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default
-#   3. helm install istiod istio/istiod -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-prod.yaml
+#   2. helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default --wait
+#   3. helm upgrade --install istiod istio/istiod -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-prod.yaml --wait
 #   4. (Optional Classic Gateways - or use Kubernetes Gateway API v1.6.1 automated deployment):
-#      helm install istio-ingressgateway istio/gateway -n istio-system --version 1.32.0
+#      helm upgrade --install istio-ingressgateway istio/gateway -n istio-system --version 1.32.0 --wait
 # =============================================================================
-
-profile: default
 
 # Explicit revision tag for zero-downtime canary control plane upgrades (see Module 08)
 revision: ""
 
-pilot:
-  autoscaleEnabled: true
-  autoscaleMin: 3
-  autoscaleMax: 10
-  replicaCount: 3
-  cpu:
-    targetAverageUtilization: 70
-  resources:
-    requests:
-      cpu: 500m
-      memory: 2048Mi
-    limits:
-      cpu: 2000m
-      memory: 4096Mi
-  env:
-    PILOT_ENABLE_STATUS: "true"
-    # Native Kubernetes sidecar containers (KEP-753, GA in K8s 1.33+) are enabled by default in Istio 1.32
-    ENABLE_NATIVE_SIDECARS: "true"
-    PILOT_ENABLE_PROTOCOL_SNIFFING_FOR_OUTBOUND: "true"
-  podAntiAffinityLabelSelector:
-    - key: app
-      operator: In
-      values: istiod
-      topologyKey: topology.kubernetes.io/zone
+# Top-level istiod (Pilot) settings matching istio/istiod 1.32.0 values.yaml schema
+autoscaleEnabled: true
+autoscaleMin: 3
+autoscaleMax: 10
+replicaCount: 3
+cpu:
+  targetAverageUtilization: 70
+
+traceSampling: 1.0
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 2048Mi
+  limits:
+    cpu: 2000m
+    memory: 4096Mi
+
+env:
+  PILOT_ENABLE_STATUS: "true"
+  # Native Kubernetes sidecar containers (KEP-753, GA in K8s 1.33+) are enabled by default in Istio 1.32
+  ENABLE_NATIVE_SIDECARS: "true"
+  PILOT_ENABLE_PROTOCOL_SNIFFING_FOR_OUTBOUND: "true"
+
+# Spread istiod replicas across availability zones for high availability
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: istiod
+          topologyKey: topology.kubernetes.io/zone
 
 pdb:
-  enabled: true
   minAvailable: 2
 
 meshConfig:

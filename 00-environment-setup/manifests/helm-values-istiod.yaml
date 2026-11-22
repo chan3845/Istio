@@ -1,29 +1,43 @@
 # =============================================================================
 # Lab Control Plane Helm Values for Istio 1.32.0 (istio/istiod chart)
 # =============================================================================
+# Compatible with Helm 3 (v3.16+) and Helm 4 (v4.3.x).
+#
+# IMPORTANT NOTE ON ISTIO 1.32.0 HELM PROFILES (`zzz_profile.yaml`):
+# In the official `istio/istiod` 1.32.0 Helm chart, the chart's built-in
+# `values.yaml` (`_internal_defaults_do_not_set`) IS ALREADY the `default` profile.
+# The chart only ships overlay files (`files/profile-<name>.yaml`) for non-default
+# profiles (`ambient`, `demo`, `preview`, `remote`, `stable`).
+# Setting `profile: default` causes `istiod/templates/zzz_profile.yaml` to fail
+# with `unknown profile default`. Leave `profile` unset (or `""`) for the default
+# sidecar profile.
+#
 # Install with:
 #   helm repo add istio https://blob.istio.io/istio-release/charts --force-update
 #   helm repo update
-#   helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default
+#   helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.32.0 --set defaultRevision=default --wait
 #   helm upgrade --install istiod istio/istiod -n istio-system --version 1.32.0 -f 00-environment-setup/manifests/helm-values-istiod.yaml --wait
 # =============================================================================
 
-profile: default
+# Top-level istiod (Pilot) settings matching istio/istiod 1.32.0 values.yaml schema
+autoscaleEnabled: false
+replicaCount: 1
 
-pilot:
-  autoscaleEnabled: false
-  replicaCount: 1
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-    limits:
-      cpu: 1000m
-      memory: 1024Mi
-  env:
-    PILOT_ENABLE_STATUS: "true"
-    # Native Kubernetes sidecar containers (KEP-753, GA in K8s 1.33+)
-    ENABLE_NATIVE_SIDECARS: "true"
+# Sets PILOT_TRACE_SAMPLING on istiod (100% in lab so every curl produces a trace)
+traceSampling: 100.0
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+
+env:
+  PILOT_ENABLE_STATUS: "true"
+  # Native Kubernetes sidecar containers (KEP-753, GA in K8s 1.33+)
+  ENABLE_NATIVE_SIDECARS: "true"
 
 meshConfig:
   # Enable Envoy access logs to stdout so we can inspect L7 telemetry and Envoy response flags
@@ -41,7 +55,7 @@ meshConfig:
     drainDuration: 45s
     terminationDrainDuration: 5s
     tracing:
-      # 100% sampling in the lab environment so every curl produces a trace; in production set to 1.0% (see helm-values-prod.yaml)
+      # 100% sampling in the lab environment; in production set to 1.0% (see helm-values-prod.yaml)
       sampling: 100.0
   extensionProviders:
     - name: jaeger
@@ -72,4 +86,3 @@ meshConfig:
             authority: "%REQ(:AUTHORITY)%"
             downstream_tls_cipher: "%DOWNSTREAM_TLS_CIPHER%"
             spiffe_peer: "%DOWNSTREAM_PEER_URI_SAN%"
-

@@ -6,7 +6,7 @@
 > - **Authoritative Baseline**: Istio `1.32.0` | Envoy `v1.40` | Kubernetes `v1.36+` (Supported: `1.33`–`1.37`) | Gateway API `v1.6.1` — see [`../VERSIONS.md`](../VERSIONS.md) and [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
 > - **Fellowship Cohort 01 Mapping**: Complete this module alongside **[Week 01: Platform Onboarding (`NP-101`)](../fellowship/week-01-platform-onboarding/WEEK.md)**.
 > - **Estimated Completion Time**: `45 mins` (Reading + Cluster & Platform Provisioning Lab)
-> - **Prerequisites**: Docker (`27.x+`), `kind` (`v0.27+`), `kubectl` (`v1.36+`), `istioctl` (`v1.32.0`), `helm` (`v3.17+`), `jq`, and `openssl`.
+> - **Prerequisites**: Docker (`27.x+`), `kind` (`v0.27+`), `kubectl` (`v1.36+`), `istioctl` (`v1.32.0`), `helm` (`v3.16+` or `v4.x`), `jq`, and `openssl`.
 
 ### Module Learning Objectives
 By the end of this module, you will be able to:
@@ -60,16 +60,30 @@ In Istio `1.32.0`, the authoritative installation and lifecycle mechanism is **H
 > - [`manifests/helm-values-ingressgateway.yaml`](./manifests/helm-values-ingressgateway.yaml) & [`manifests/helm-values-egressgateway.yaml`](./manifests/helm-values-egressgateway.yaml) (Gateway values)
 > - [`manifests/helm-values-prod.yaml`](./manifests/helm-values-prod.yaml) (Production High-Availability Control Plane values)
 
-### 2.2 Why Installation Profiles Matter: Learning vs. Production
+### 2.2 Why Installation Profiles Matter & How `zzz_profile.yaml` Works in Helm vs. `istioctl`
 
-When configuring Helm values (`profile: default`) or running `istioctl install`, Istio applies a built-in **configuration profile** unless overridden. Choosing the wrong profile in production is one of the most common operational mistakes.
+In Istio `1.32.0`, configuration profiles work differently depending on whether you install via **Helm (`istio/istiod`)** or **`istioctl install`**:
 
-| Profile | Components Installed | Key Defaults & Behavior | Target Environment |
+> [!IMPORTANT]
+> **Critical Istio `1.32.0` Helm Pitfall: Why `profile: default` Fails in `istio/istiod`**
+> If you pass `--set profile=default` (or `profile: default` in `values.yaml`) to `helm install istiod istio/istiod`, Helm fails immediately with:
+> ```text
+> Error: execution error at (istiod/templates/zzz_profile.yaml:31:3):
+> unknown profile default
+> ```
+> **Why does this happen under the hood?**
+> 1. Inside the `istio/istiod` `1.32.0` chart, the built-in `values.yaml` (`_internal_defaults_do_not_set`) **is already the `default` profile**.
+> 2. When `istiod/templates/zzz_profile.yaml` evaluates `.Values.profile`, if the value is non-empty, it calls `$.Files.Get (printf "files/profile-%s.yaml" .)`.
+> 3. The chart's `files/` directory only packages **overlay profiles** (`profile-ambient.yaml`, `profile-demo.yaml`, `profile-preview.yaml`, `profile-remote.yaml`, `profile-stable.yaml`, plus platform overlays like `profile-platform-gke.yaml`). There is **no** `files/profile-default.yaml`!
+> 4. Therefore, to use the standard production default profile in Helm, **omit `profile` (or set `profile: ""`)**. Also note: do **not** blindly substitute `profile: stable` for `default`—in Istio `1.32.0`, `profile-stable.yaml` enables `experimental.stableValidationPolicy: true` (an experimental admission policy that blocks non-GA fields).
+
+| Profile (`istioctl`) | Helm Chart (`istio/istiod`) Equivalent | Key Defaults & Behavior | Target Environment |
 | :--- | :--- | :--- | :--- |
-| **`default`** | `istiod` (+ `istio/gateway` via Helm) | Production-safe defaults, `1%` trace sampling, standard resource requests (`100m` CPU / `128Mi` RAM). | **Production baseline** (customizable via Helm `values.yaml`). |
-| **`demo`** | `istiod`, `istio-ingressgateway`, `istio-egressgateway` | `100%` trace sampling, verbose access logging, minimal CPU/memory requests (`10m` CPU / `40Mi` RAM). | **Never use in production.** High trace sampling and tiny resource requests cause severe CPU throttling under load. |
-| **`minimal`** | `istiod` only | Control plane only; gateways are deployed separately as standalone Helm releases or via Gateway API. | **Enterprise GitOps** where gateways are managed by separate teams/namespaces or via Kubernetes Gateway API (`v1.6.1`). |
-| **`ambient`** | `istiod`, `istio-cni`, `ztunnel` | Enables sidecarless Ambient Data Plane mode (`ztunnel` L4 DaemonSet + `istio-cni`). | **Ambient Mesh deployments** (covered in [Module 01 Lesson 04](../01-architecture-and-internals/lessons/04-ambient-mode-ztunnel-and-waypoints.md)). |
+| **`default`** | **Omit `profile` (or `profile: ""`)** *(Built into `values.yaml`)* | Production-safe defaults, `1%` trace sampling, standard resource requests (`100m` CPU / `128Mi` RAM per proxy). | **Production & Fellowship Baseline** (customized via Helm `values.yaml`). |
+| **`demo`** | `profile: demo` (`files/profile-demo.yaml`) | `100%` trace sampling, verbose access logging, miniature CPU/memory requests (`10m` CPU / `40Mi` RAM). | **Never use in production.** High trace sampling and tiny resource requests cause severe CPU throttling under load. |
+| **`ambient`** | `profile: ambient` (`files/profile-ambient.yaml`) + `istio/cni` & `istio/ztunnel` charts | Enables sidecarless Ambient Data Plane mode (`PILOT_ENABLE_AMBIENT: "true"`, `ISTIO_META_ENABLE_HBONE: "true"`). | **Ambient Mesh deployments** (covered in [Module 01 Lesson 04](../01-architecture-and-internals/lessons/04-ambient-mode-ztunnel-and-waypoints.md)). |
+| **`stable`** | `profile: stable` (`files/profile-stable.yaml`) | Sets `experimental.stableValidationPolicy: true` to reject alpha/beta fields via admission control. | **Experimental strict-API validation clusters only** (not a drop-in replacement for `default`). |
+| **`minimal`** | Install `istio/base` + `istio/istiod` without `istio/gateway` *(No `profile-minimal.yaml` in Helm)* | Control plane only; gateways are deployed separately as standalone Helm releases or via Gateway API. | **Enterprise GitOps** where gateways are managed separately or via Kubernetes Gateway API (`v1.6.1`). |
 
 ### 2.3 Cilium CNI Compatibility Requirements (Istio `1.32.0` Sidecar & Ambient Modes)
 

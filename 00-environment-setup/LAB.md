@@ -30,7 +30,7 @@ Ensure the following CLI tools are installed on your workstation:
 - `kubectl` (`v1.36+`)
 - `kind` (`v0.27+` — if running locally)
 - `istioctl` (`v1.32.0`)
-- `helm` (`v3.17+` — for production Helm chart installation)
+- `helm` (`v3.16+` or `v4.x` — compatible with both Helm 3 and Helm 4, including `v4.3.x`)
 - `jq` and `openssl` (for inspecting JSON outputs and TLS certificates)
 
 ---
@@ -89,7 +89,14 @@ helm upgrade --install istio-base istio/base \
   --set defaultRevision=default \
   --wait
 
-# 3. Install istiod (Control Plane) using our lab Helm values
+# 3. Validate Helm template rendering locally, then install istiod (Control Plane)
+# (Note: helm-values-istiod.yaml omits 'profile: default' because the istio/istiod
+#  1.32.0 chart's built-in values.yaml already represents the default profile)
+helm template istiod istio/istiod \
+  -n istio-system \
+  --version 1.32.0 \
+  -f 00-environment-setup/manifests/helm-values-istiod.yaml > /dev/null
+
 helm upgrade --install istiod istio/istiod \
   -n istio-system \
   --version 1.32.0 \
